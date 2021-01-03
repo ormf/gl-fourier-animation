@@ -148,7 +148,7 @@
        (sdl:update-display)))))
 
 ;;; (setf *angle-increment* 0.01)
-;;; (setf *angle* 0)
+;;; (setf *mode* 2)
 
 (set-speed 0.04)
 (setf *mode* 3)

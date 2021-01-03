@@ -22,8 +22,10 @@
 
 (defconstant +float-size+ 4)
 (defparameter *debug* nil)
+(defparameter *angle-incr* 0.002)
+(defparameter *window* nil)
 
-(defparameter *arrowhead* #(0.07 0.0075 0.09 0.0 0.07 -0.0075))
+(defparameter *arrowhead* #(0.08 0.0075 0.1 0.0 0.08 -0.0075))
 
 ;;; triangle.lisp --- Example usage of vertex and fragment shaders,
 ;;; vertex buffer objects, and vertex array objects
@@ -40,6 +42,7 @@
    (arrow-program :accessor arrow-program)
    (angle :accessor angle :initform 0.0)
    (num :accessor num :initform 512)
+   (curr-num :accessor curr-num :initform 512)
    (curr-path :accessor curr-path :initform nil)
    (shape :accessor shape :type (or null ) :initform nil)) 
   (:default-initargs :width 400 :height 400 :pos-x 100 :pos-y 100
@@ -82,7 +85,7 @@ mat2 rotate2d(float _angle){
 void
 main()
 {
-    gl_Position = projection * vec4((aTransform.z*aPos*rotate2d(aTransform.w))+aTransform.xy, 0.0, 1.0);
+    gl_Position = projection * vec4((aTransform.z*aPos*rotate2d(aTransform.w))+aTransform.xy, 0.01, 1.0);
 }
 ")
 
@@ -124,9 +127,9 @@ void main()
      (gl:bind-buffer ,type 0)))
 
 (defun set-offset-data (w)
-  (with-slots (offset-buffer angle) w
+  (with-slots (offset-buffer angle num) w
     (set-vbo-data (:array-buffer :dynamic-draw offset-buffer)
-                  (loop for i below 512 append (list (- (* 0.2 (mod i 10)) 0.9)
+                  (loop for i below num append (list (- (* 0.2 (mod i 10)) 0.9)
                                                      (- (* 0.2 (mod (floor i 10) 10)) 0.9)
                                                      (+ 0.1 (random 0.7))
                                                      0.0)))))
@@ -143,7 +146,8 @@ void main()
     (return-from glut:display-window nil))
   (with-slots (circle-vbo arrowhead-vbo arrowstem-vbo
                offset-buffer
-               circle-program arrow-program)
+               circle-program arrow-program
+               num)
       w
     (let ((buffers (gl:gen-buffers 4)))
       (setf circle-vbo (elt buffers 0))
@@ -151,12 +155,12 @@ void main()
       (setf arrowstem-vbo (elt buffers 2))
       (setf offset-buffer (elt buffers 3)))
     (set-vbo-data (:array-buffer :static-draw circle-vbo)
-                  (get-circle-verts 64 0.09))
+                  (get-circle-verts 64 0.1))
     (set-vbo-data (:array-buffer :static-draw arrowhead-vbo) *arrowhead*)
     (set-vbo-data (:array-buffer :static-draw arrowstem-vbo)
                   #(0.0 0.002 0.08 0.002 0.08 -0.002 0.0 -0.002))  
     (set-vbo-data (:array-buffer :dynamic-draw offset-buffer)
-                  (loop for i below 512 append (list (- (* 0.2 (mod i 10)) 0.9)
+                  (loop for i below num append (list (- (* 0.2 (mod i 10)) 0.9)
                                                      (- (* 0.2 (mod (floor i 10) 10)) 0.9)
                                                      (+ 0.1 (random 0.7))
                                                      0.0)))
@@ -238,7 +242,7 @@ void main()
       (gl:use-program circle-program)
       (cl-opengl-bindings:uniform-4f (gl:get-uniform-location circle-program "Color") 1.0 0.3 0.0 0.5)
       (gl:use-program arrow-program)
-      (cl-opengl-bindings:uniform-4f (gl:get-uniform-location arrow-program "Color") 1.0 1.0 1.0 1.0)
+      (cl-opengl-bindings:uniform-4f (gl:get-uniform-location arrow-program "Color") 0.6 0.6 0.6 1.0)
       (gl:use-program circle-program)
 
       (gl:delete-shader circle-vs)
@@ -261,50 +265,56 @@ void main()
 
 (defparameter *print* t)
 
+(setf *print* t)
 (setf *print* nil)
 
 (defmethod glut:display ((w circle-window))
   (update-swank)
-  ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
-  (with-slots (angle circle-program circle-vao arrow-program arrowhead-vao arrowstem-vao offset-buffer
-               shape num) 
-      w
-    (setf num 6)
-    (continuable          
-      (incf angle *angle-incr*)
-      (gl-init)
-      (gl:bind-buffer :array-buffer offset-buffer)
-      (with-slots (freq-idx-transform-fn scale fft) shape
-        (gl:with-mapped-buffer (p1 :array-buffer :read-write)
-          (loop
-            for i below (* 4 num) by 4
-            for n from 0
-            for x = (get-idx i *mode*)
-            for idx = (funcall freq-idx-transform-fn x)
-            for curr-offset = (* (exp (* +i+ idx angle)) (aref fft x))
-              then (+ curr-offset (* 10 (exp (* +i+ idx angle)) (aref fft x)))
-            do (progn
-                 (if *print* (format t "~&~a ~a ~a~%"
-                                     (float (realpart curr-offset) 1.0)
-                                     (float (imagpart curr-offset) 1.0)
-                                     (float (* 1 (abs (aref fft x))) 1.0)))
-                 (setf (cffi:mem-aref p1 :float (+ i 0)) (float (realpart curr-offset) 1.0))
-                 (setf (cffi:mem-aref p1 :float (+ i 1)) (float (imagpart curr-offset) 1.0))
-                 (setf (cffi:mem-aref p1 :float (+ i 2)) (float (* 10 (abs (aref fft x))) 1.0))
-                 (setf (cffi:mem-aref p1 :float (+ i 3)) (float (* angle idx) 1.0))))))
-      (gl:matrix-mode :modelview)
-      (gl:load-identity)
+  (let ((curr-pos))
+    ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
+    (with-slots (angle circle-program circle-vao arrow-program arrowhead-vao arrowstem-vao offset-buffer
+                 shape num curr-num) 
+        w
+      (setf curr-num 512)
+      (continuable          
+        (incf angle *angle-incr*)
+        (gl-init)
+        (gl:bind-buffer :array-buffer offset-buffer)
+        (with-slots (freq-idx-transform-fn scale fft) shape
+          (gl:with-mapped-buffer (p1 :array-buffer :read-write)
+            (loop
+              for curr-offset = (complex 0.0 0.0) then next-offset
+              for i below curr-num
+              for n from 0
+              for x = (get-idx i *mode*)
+              for idx = (funcall freq-idx-transform-fn x)
+              for next-offset = (* (exp (* +i+ idx angle))  (aref fft x))
+                then (+ next-offset (* (exp (* +i+ idx angle)) (aref fft x)))
+              do (let ((offs (* i 4)))
+                   (if *print* (format t "~&~a ~a ~a~%"
+                                       (float (realpart curr-offset) 1.0)
+                                       (float (imagpart curr-offset) 1.0)
+                                       (float (* 1 (abs (aref fft x))) 1.0)))
+                   (setf (cffi:mem-aref p1 :float (+ offs 0)) (float (realpart curr-offset) 1.0))
+                   (setf (cffi:mem-aref p1 :float (+ offs 1)) (float (imagpart curr-offset) 1.0))
+                   (setf (cffi:mem-aref p1 :float (+ offs 2)) (float (* 10 (abs (aref fft x))) 1.0))
+                   (setf (cffi:mem-aref p1 :float (+ offs 3)) (float (+ (phase (aref fft x)) (* angle idx)) 1.0)))
+              finally (setf curr-pos next-offset))))
+        (gl:matrix-mode :modelview)
+        (gl:load-identity)
 ;;;      (glu:perspective 50 (/ (glut:width w) (glut:height w)) -1 1)
 ;;;      (gl:ortho 0 (glut:width w) 0 (glut:height w) -1 1)
-;;; (gl:translate (* (- 1 gl-scale) gl-width) (* (- 1 gl-scale) gl-height) 0.0)
+;;; (gl:translate (* (- 1 1) gl-width) (* (- 1 1) gl-height) 0.0)
 
 ;;;      (gl:rotate 0 0 0 1)
-      (gl:scale 4 4 4)
-      (gl:translate 0 0 0)
-      (when (circle-program w)
-        (let ((proj-mat (gl:get-float :modelview-matrix)))
-          (draw-circles proj-mat circle-program circle-vao num)
-          (draw-arrows proj-mat arrow-program arrowhead-vao arrowstem-vao num)))))
+        (gl:scale 4 -4 4)
+        (gl:translate (* 1/10 -1 (realpart curr-pos)) (* 1/10 -1 (imagpart curr-pos)) 0)
+        ;;        (gl:translate 0 0 0)
+        (gl:rotate 90 0 0 1)
+        (when (circle-program w)
+          (let ((proj-mat (gl:get-float :modelview-matrix)))
+            (draw-circles proj-mat circle-program circle-vao curr-num)
+            (draw-arrows proj-mat arrow-program arrowhead-vao arrowstem-vao curr-num))))))
   (glut:swap-buffers)
   (gl:finish))
 
@@ -374,5 +384,13 @@ void main()
 ;;; (02-indexed-circles)
 ;;; (gl:named-buffer-storage)
 
-(defparameter *angle-incr* 0.02)
-(defparameter *window* nil)
+#|
+(setf (angle *window*) 0)
+
+(setf *mode* 3)
+
+(funcall (slot-value *curr-shape* 'freq-idx-transform-fn) 511)
+|#
+
+
+
