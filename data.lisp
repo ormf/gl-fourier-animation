@@ -33,7 +33,8 @@ number of points on the path needs to be a power of two."
            (fft (normalize-fft
                  (bordeaux-fft:fft
                   (coerce (make-array fft-size :initial-contents complex-coords)
-                   'bordeaux-fft:complex-sample-array)))))
+                          'bordeaux-fft:complex-sample-array)))))
+      (setf (aref fft 0) (complex 0.0d0 0.0d0))
       (make-shape
        :coords complex-coords
        :size fft-size

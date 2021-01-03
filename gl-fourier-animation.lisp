@@ -29,6 +29,7 @@
 (defparameter *max-num* 30)
 (defparameter *angle-increment* -0.005)
 (defparameter *shift* (floor (/ *max-num* -2)))
+(setf *max-num* 512)
 
 (defparameter *cyclic-path* (make-array 2048 :element-type 'vector
                                              :initial-contents (loop for i below 2048 collect (vector 0 0))))
@@ -126,7 +127,7 @@
               ;; Clear the display each game loop
        (sdl:clear-display sdl:*black*)
        ;; Draw the shape outline
-;;       (draw-shape)
+       (draw-shape)
        (paint)
        (let ((offset (get-offset *mode*)))
          (with-slots (fft scale freq-idx-transform-fn) *curr-shape*

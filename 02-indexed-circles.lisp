@@ -39,7 +39,9 @@
    (circle-program :accessor circle-program)
    (arrow-program :accessor arrow-program)
    (angle :accessor angle :initform 0.0)
-   (shape :accessor shape :initform nil)) 
+   (num :accessor num :initform 512)
+   (curr-path :accessor curr-path :initform nil)
+   (shape :accessor shape :type (or null ) :initform nil)) 
   (:default-initargs :width 400 :height 400 :pos-x 100 :pos-y 100
 		     :mode '(:double :rgb :depth) :title "02-circles.lisp"))
 
@@ -247,25 +249,49 @@ void main()
 (defmethod glut:idle ((w circle-window))
   (glut:post-redisplay))
 
-(defmethod glut:display ((w circle-window))
-  (update-swank)
-  ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
-  (with-slots (angle circle-program circle-vao arrow-program arrowhead-vao arrowstem-vao offset-buffer) 
-      w
-    (continuable
+(defun gl-init ()
       (gl:enable :blend)
       (gl:blend-func :src-alpha :one)
       (gl:disable :depth-test)
       (gl:depth-func :lequal)
-      (incf angle *angle-incr*)
+
       (gl:clear-color 0 0 0 1.0)
       (gl:clear :color-buffer-bit :depth-buffer-bit)
-      (gl:line-width 1)
-      (gl:bind-buffer :array-buffer offset-buffer)          
-      (gl:with-mapped-buffer (p1 :array-buffer :read-write)
-        (loop
-          for i below (* 4 512) by 4
-          do (setf (cffi:mem-aref p1 :float (+ i 3)) (* angle (if (> i 256) (- i 512) i)))))
+      (gl:line-width 1))
+
+(defparameter *print* t)
+
+(setf *print* nil)
+
+(defmethod glut:display ((w circle-window))
+  (update-swank)
+  ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
+  (with-slots (angle circle-program circle-vao arrow-program arrowhead-vao arrowstem-vao offset-buffer
+               shape num) 
+      w
+    (setf num 6)
+    (continuable          
+      (incf angle *angle-incr*)
+      (gl-init)
+      (gl:bind-buffer :array-buffer offset-buffer)
+      (with-slots (freq-idx-transform-fn scale fft) shape
+        (gl:with-mapped-buffer (p1 :array-buffer :read-write)
+          (loop
+            for i below (* 4 num) by 4
+            for n from 0
+            for x = (get-idx i *mode*)
+            for idx = (funcall freq-idx-transform-fn x)
+            for curr-offset = (* (exp (* +i+ idx angle)) (aref fft x))
+              then (+ curr-offset (* 10 (exp (* +i+ idx angle)) (aref fft x)))
+            do (progn
+                 (if *print* (format t "~&~a ~a ~a~%"
+                                     (float (realpart curr-offset) 1.0)
+                                     (float (imagpart curr-offset) 1.0)
+                                     (float (* 1 (abs (aref fft x))) 1.0)))
+                 (setf (cffi:mem-aref p1 :float (+ i 0)) (float (realpart curr-offset) 1.0))
+                 (setf (cffi:mem-aref p1 :float (+ i 1)) (float (imagpart curr-offset) 1.0))
+                 (setf (cffi:mem-aref p1 :float (+ i 2)) (float (* 10 (abs (aref fft x))) 1.0))
+                 (setf (cffi:mem-aref p1 :float (+ i 3)) (float (* angle idx) 1.0))))))
       (gl:matrix-mode :modelview)
       (gl:load-identity)
 ;;;      (glu:perspective 50 (/ (glut:width w) (glut:height w)) -1 1)
@@ -273,38 +299,31 @@ void main()
 ;;; (gl:translate (* (- 1 gl-scale) gl-width) (* (- 1 gl-scale) gl-height) 0.0)
 
 ;;;      (gl:rotate 0 0 0 1)
-      (gl:scale 1 1 1)
-      (gl:translate 0.0 0.0 0)
+      (gl:scale 4 4 4)
+      (gl:translate 0 0 0)
       (when (circle-program w)
         (let ((proj-mat (gl:get-float :modelview-matrix)))
-          (gl:uniform-matrix 
-           (gl:get-uniform-location (circle-program w) "projection") 
-           4 (vector proj-mat) nil)))
-      (let ((proj-mat (gl:get-float :modelview-matrix)))
-        (gl:uniform-matrix 
-         (gl:get-uniform-location (arrow-program w) "projection") 
-         4 
-         (vector proj-mat)
-         nil)
-        (gl:line-width 1)
-        (gl:matrix-mode :modelview)
-        (gl:bind-buffer :array-buffer 0)
-        (gl:use-program circle-program)
-        (gl:uniform-matrix 
-         (gl:get-uniform-location (circle-program w) "projection") 
-         4 (vector proj-mat) nil)
-        (gl:bind-vertex-array circle-vao)
-        (gl:draw-arrays-instanced :lines 0 129 512)
-        (gl:use-program arrow-program)
-        (gl:uniform-matrix
-         (gl:get-uniform-location (arrow-program w) "projection") 
-         4 (vector proj-mat) nil)
-        (gl:bind-vertex-array arrowhead-vao)
-        (gl:draw-arrays-instanced :triangles 0 3 512)
-        (gl:bind-vertex-array arrowstem-vao)
-        (gl:draw-arrays-instanced :quads 0 4 512))))
+          (draw-circles proj-mat circle-program circle-vao num)
+          (draw-arrows proj-mat arrow-program arrowhead-vao arrowstem-vao num)))))
   (glut:swap-buffers)
   (gl:finish))
+
+(defun draw-circles (proj-mat program vao num)
+          (gl:line-width 2)
+          (gl:use-program program)
+          (gl:uniform-matrix 
+           (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
+          (gl:bind-vertex-array vao)
+          (gl:draw-arrays-instanced :lines 0 129 num))
+
+(defun draw-arrows (proj-mat arrow-program arrowhead-vao arrowstem-vao num)
+          (gl:use-program arrow-program)
+          (gl:uniform-matrix
+           (gl:get-uniform-location arrow-program "projection") 4 (vector proj-mat) nil)
+          (gl:bind-vertex-array arrowhead-vao)
+          (gl:draw-arrays-instanced :triangles 0 3 num)
+          (gl:bind-vertex-array arrowstem-vao)
+          (gl:draw-arrays-instanced :quads 0 4 num))
 
 (defmethod glut:reshape ((w circle-window) width height)
   (gl:viewport 0 0 (min width height) (min width height))
@@ -341,7 +360,10 @@ void main()
    (gl:delete-program (circle-program w))))
 
 (defun 02-indexed-circles ()
-  (let ((w (make-instance 'circle-window)))
+  (let ((w (make-instance 'circle-window :width 1000 :height 800)))
+    (setf *window* w)
+    (setf (shape w) *achtel-512*)
+    (setf *curr-shape* *achtel-512*)
     (unwind-protect
          (continuable
            (glut:display-window w))
@@ -352,4 +374,5 @@ void main()
 ;;; (02-indexed-circles)
 ;;; (gl:named-buffer-storage)
 
-(defparameter *angle-incr* 0.0001)
+(defparameter *angle-incr* 0.02)
+(defparameter *window* nil)
