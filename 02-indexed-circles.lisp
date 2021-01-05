@@ -34,26 +34,66 @@
   ((circle-vbo :accessor circle-vbo)
    (arrowhead-vbo :accessor arrowhead-vbo)
    (arrowstem-vbo :accessor arrowstem-vbo)
+   (shape-vbo :accessor shape-vbo)
+   (coordinate-system-vbo :accessor coordinate-system-vbo)
    (offset-buffer :accessor offset-buffer)
+   (shape-buffer :accessor shape-buffer)
    (circle-vao :accessor circle-vao)
    (arrowhead-vao :accessor arrowhead-vao)
    (arrowstem-vao :accessor arrowstem-vao)
    (circle-program :accessor circle-program)
    (arrow-program :accessor arrow-program)
+   (shape-program :accessor shape-program)
    (angle :accessor angle :initform 0.0)
    (num :accessor num :initform 512)
    (curr-num :accessor curr-num :initform 512)
    (curr-path :accessor curr-path :initform nil)
+   (zoom :accessor zoom :initform 1)
+   (x-angle :accessor x-angle :initform 0)
+   (y-angle :accessor y-angle :initform 0)
+   (z-angle :accessor z-angle :initform 0)
    (shape :accessor shape :type (or null ) :initform nil)) 
   (:default-initargs :width 400 :height 400 :pos-x 100 :pos-y 100
 		     :mode '(:double :rgb :depth) :title "02-circles.lisp"))
+
+;;; program for drawing the shape: location = 0 contain the 3D
+;;; vertexes of the shape, calculated in realtime for each frame in
+;;; the glut:display routine.
+
+(defparameter *shape-vertex-shader-program*
+  "
+#version 330 core
+
+layout (location = 0) in vec3 aPos;
+
+uniform mat4 projection;
+
+void
+main()
+{
+    gl_Position = projection * vec4(aPos.xyz, 1.0);
+}
+")
+
+;;; program for indexed drawing: location = 0 contain the vertexes of
+;;; one circle (precalculated once in the display-window :before
+;;; method), location = 1 contain the offsets/length/angle for each
+;;; circle to draw, calculated in realtime for each frame in the
+;;; glut:display routine:
+;;;
+;;; aTransform.xy = offset of shape
+;;; aTransform.w = angle
+;;; aTransform.z = length
+;;;
+;;; The phase (aTransform.w) isn't used as the circles doesn't have to
+;;; be rotated.
 
 (defparameter *circle-vertex-shader-program*
   "
 #version 330 core
 
-layout (location = 0) in vec2 aPos;
-layout (location = 1) in vec4 aTransform;
+layout (location = 0) in vec2 aPos; // The vbo of the shape to draw
+layout (location = 1) in vec4 aTransform;  // the offsets from offset-buffer
 
 uniform mat4 projection;
 // uniform mat4 view;
@@ -66,12 +106,23 @@ main()
 }
 ")
 
+;;; program for indexed drawing: location = 0 contain the vertexes of
+;;; one arrow (precalculated once in the display-window :before
+;;; method), location = 1 contain the offsets/length/angle for each
+;;; arrow to draw, calculated in realtime for each frame in the
+;;; glut:display routine:
+;;;
+;;; aTransform.xy = offset of shape
+;;; aTransform.w = angle
+;;; aTransform.z = length
+;;;
+
 (defparameter *arrow-vertex-shader-program*
   "
 #version 330 core
 
-layout (location = 0) in vec2 aPos;
-layout (location = 1) in vec4 aTransform;
+layout (location = 0) in vec2 aPos; // The vbo of the shape to draw
+layout (location = 1) in vec4 aTransform;  // The offsets from offset buffer
 
 uniform mat4 projection;
 // uniform mat4 view;
@@ -145,15 +196,17 @@ void main()
     (glut:destroy-current-window)
     (return-from glut:display-window nil))
   (with-slots (circle-vbo arrowhead-vbo arrowstem-vbo
-               offset-buffer
-               circle-program arrow-program
+               circle-vao
+               offset-buffer shape-buffer
+               circle-program arrow-program shape-program
                num)
       w
-    (let ((buffers (gl:gen-buffers 4)))
+    (let ((buffers (gl:gen-buffers 5)))
       (setf circle-vbo (elt buffers 0))
       (setf arrowhead-vbo (elt buffers 1))
       (setf arrowstem-vbo (elt buffers 2))
-      (setf offset-buffer (elt buffers 3)))
+      (setf offset-buffer (elt buffers 3))
+      (setf shape-buffer (elt buffers 4)))
     (set-vbo-data (:array-buffer :static-draw circle-vbo)
                   (get-circle-verts 64 0.1))
     (set-vbo-data (:array-buffer :static-draw arrowhead-vbo) *arrowhead*)
@@ -164,30 +217,38 @@ void main()
                                                      (- (* 0.2 (mod (floor i 10) 10)) 0.9)
                                                      (+ 0.1 (random 0.7))
                                                      0.0)))
+    (set-vbo-data (:array-buffer :dynamic-draw shape-buffer)
+                  (loop for i below num append (list 0.0 0.0 0.0 0.0)))
 
     ;; Vertex array objects manage which vertex attributes are
     ;; associated with which data buffers. 
 
     (let ((circle-vs (gl:create-shader :vertex-shader))
           (arrow-vs (gl:create-shader :vertex-shader))
-          (fs (gl:create-shader :fragment-shader)))
+          (shape-vs (gl:create-shader :vertex-shader))
+          (fs (gl:create-shader :fragment-shader))
+)
       (gl:shader-source circle-vs *circle-vertex-shader-program*)
       (gl:compile-shader circle-vs)
       (gl:shader-source arrow-vs *arrow-vertex-shader-program*)
       (gl:compile-shader arrow-vs)
       (gl:shader-source fs *fragment-shader-program*)
       (gl:compile-shader fs)
+      (gl:shader-source shape-vs *shape-vertex-shader-program*)
+      (gl:compile-shader shape-vs)
       ;; If the shader doesn't compile, you can print errors with:
       (if *debug*
           (progn
             (print (gl:get-shader-info-log circle-vs))
             (print (gl:get-shader-info-log arrow-vs))
             (print (gl:get-shader-info-log fs))))
-      (setf (circle-program w) (gl:create-program))
+      (setf shape-program (gl:create-program))
+      (gl:attach-shader shape-program shape-vs)
+      (setf circle-program (gl:create-program))
       (gl:attach-shader circle-program circle-vs)
       (gl:attach-shader circle-program fs)
-      (setf (circle-vao w) (gl:gen-vertex-array))
-      (gl:bind-vertex-array (circle-vao w))
+      (setf circle-vao (gl:gen-vertex-array))
+      (gl:bind-vertex-array circle-vao)
 
       ;; To associate our CIRCLE-VBO data with this VAO, we bind it, specify
       ;; which vertex attribute we want to associate it with, and specify
@@ -249,7 +310,6 @@ void main()
       (gl:delete-shader arrow-vs)
       (gl:delete-shader fs))))
 
-
 (defmethod glut:idle ((w circle-window))
   (glut:post-redisplay))
 
@@ -263,6 +323,32 @@ void main()
       (gl:clear :color-buffer-bit :depth-buffer-bit)
       (gl:line-width 1))
 
+(defun draw-shape (proj-mat program vao num)
+          (gl:line-width 2)
+          (gl:use-program program)
+          (gl:uniform-matrix 
+           (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
+          (gl:bind-vertex-array vao)
+  (gl:draw-arrays :lines 0 num))
+
+(defun draw-circles (proj-mat program vao num)
+          (gl:line-width 2)
+          (gl:use-program program)
+          (gl:uniform-matrix 
+           (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
+          (gl:bind-vertex-array vao)
+          (gl:draw-arrays-instanced :lines 0 129 num))
+
+(defun draw-arrows (proj-mat arrow-program arrowhead-vao arrowstem-vao num)
+          (gl:use-program arrow-program)
+          (gl:uniform-matrix
+           (gl:get-uniform-location arrow-program "projection") 4 (vector proj-mat) nil)
+          (gl:bind-vertex-array arrowhead-vao)
+          (gl:draw-arrays-instanced :triangles 0 3 num)
+          (gl:bind-vertex-array arrowstem-vao)
+          (gl:draw-arrays-instanced :quads 0 4 num))
+
+
 (defparameter *print* t)
 
 (setf *print* t)
@@ -273,7 +359,8 @@ void main()
   (let ((curr-pos))
     ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
     (with-slots (angle circle-program circle-vao arrow-program arrowhead-vao arrowstem-vao offset-buffer
-                 shape num curr-num) 
+                 shape num curr-num zoom
+                 x-angle y-angle z-angle) 
         w
       (setf curr-num 512)
       (continuable          
@@ -306,34 +393,18 @@ void main()
 ;;;      (gl:ortho 0 (glut:width w) 0 (glut:height w) -1 1)
 ;;; (gl:translate (* (- 1 1) gl-width) (* (- 1 1) gl-height) 0.0)
 
-;;;      (gl:rotate 0 0 0 1)
-        (gl:scale 4 -4 4)
-        (gl:translate (* 1/10 -1 (realpart curr-pos)) (* 1/10 -1 (imagpart curr-pos)) 0)
+        (gl:rotate x-angle 1 0 0)
+        (gl:rotate y-angle 0 1 0)
+        (gl:rotate z-angle 0 0 1)
+        (gl:scale zoom (* -1 zoom) zoom)
+        (gl:translate (* -1 (realpart curr-pos)) (* -1 (imagpart curr-pos)) 0)
         ;;        (gl:translate 0 0 0)
-        (gl:rotate 90 0 0 1)
         (when (circle-program w)
           (let ((proj-mat (gl:get-float :modelview-matrix)))
-            (draw-circles proj-mat circle-program circle-vao curr-num)
+;;            (draw-circles proj-mat circle-program circle-vao curr-num)
             (draw-arrows proj-mat arrow-program arrowhead-vao arrowstem-vao curr-num))))))
   (glut:swap-buffers)
   (gl:finish))
-
-(defun draw-circles (proj-mat program vao num)
-          (gl:line-width 2)
-          (gl:use-program program)
-          (gl:uniform-matrix 
-           (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
-          (gl:bind-vertex-array vao)
-          (gl:draw-arrays-instanced :lines 0 129 num))
-
-(defun draw-arrows (proj-mat arrow-program arrowhead-vao arrowstem-vao num)
-          (gl:use-program arrow-program)
-          (gl:uniform-matrix
-           (gl:get-uniform-location arrow-program "projection") 4 (vector proj-mat) nil)
-          (gl:bind-vertex-array arrowhead-vao)
-          (gl:draw-arrays-instanced :triangles 0 3 num)
-          (gl:bind-vertex-array arrowstem-vao)
-          (gl:draw-arrays-instanced :quads 0 4 num))
 
 (defmethod glut:reshape ((w circle-window) width height)
   (gl:viewport 0 0 (min width height) (min width height))
@@ -344,7 +415,7 @@ void main()
 ;;; (glu:perspective 50 (/ (glut:width window) (glut:height window)) -1 1)
 ;;; (gl:ortho 0 width 0 height -1 1)
 ;;; (gl:translate (* (- 1 gl-scale) gl-width) (* (- 1 gl-scale) gl-height) 0.0)
-  (gl:scale 2 2 2)
+  (gl:scale 1 1 1)
   (gl:ortho -1 1 -1 1 -1 1)
   (when (circle-program w)
     (let ((proj-mat (gl:get-float :modelview-matrix)))
@@ -357,6 +428,35 @@ void main()
        (gl:get-uniform-location (arrow-program w) "projection") 4 (vector proj-mat) nil)))
   (gl:matrix-mode :modelview)
   (gl:load-identity))
+
+(defmethod glut:mouse ((window circle-window) button state x y)
+  (continuable
+    ;; (when (eql button :wheel-down)
+    ;;   (set-zoom (* *zoom* 0.99)))
+    ;; (when (eql button :wheel-up)
+    ;;   (set-zoom (* *zoom* 1.0101)))
+;;;    (format t "~a ~a ~S~%" button state (equal (list :active-ctrl) (glut:get-modifiers)))
+    (case button
+      (:left-button
+       (when (eql state :down)))
+      (:wheel-down (when (and (equal (list :active-ctrl) (glut:get-modifiers))
+                              (eql state :down))
+                     (setf (zoom window) (* (zoom window) 95/100))))
+      (:wheel-up (when (and (equal (list :active-ctrl) (glut:get-modifiers))
+                              (eql state :down))
+                     (setf (zoom window) (* (zoom window) 100/95))))
+      (:right-button (when (and (equal (list :active-ctrl) (glut:get-modifiers))
+                              (eql state :down))
+                       (setf (zoom window) 1.0))))
+      ;; (when (and (eql button :right-button) (eql state :down))
+    ;;   (push (make-boid-system
+    ;;          `(,(float x 1.0) ,(float (* -1 y) 1.0) 0.0 0.0)
+    ;;          *boids-per-click*
+    ;;          window)
+    ;;         (systems window))
+    ;;   (format t "added boid system, ~s total~%" (length (systems window)))
+    ;;   (format t " = ~:d boids~%" (reduce #'+ (systems window) :key 'boid-count)))
+    ))
 
 (defmethod glut:keyboard ((w circle-window) key x y)
   (declare (ignore x y))
@@ -387,10 +487,36 @@ void main()
 #|
 (setf (angle *window*) 0)
 
+(progn
+(setf (shape *window*) *violinschluessel-512*)
+(setf *curr-shape* *violinschluessel-512*))
+(setf (shape *window*) *achtel-512*)
+
+(progn
+(setf (shape *window*) *achtel-512*)
+(setf *curr-shape* *achtel-512*))
+
+(progn
+(setf (shape *window*) *hessen-512*)
+(setf *curr-shape* *hessen-512*))
+
+(setf *mode* 3)
+(setf *mode* 2)
 (setf *mode* 3)
 
+(setf (curr-num *window*) 2)
+
+(setf (zoom *window*) 2)
+(setf (x-angle *window*) 45)
+(setf (y-angle *window*) 45)
+(setf (z-angle *window*) 45)
+
+(progn
+(setf (x-angle *window*) 0)
+(setf (y-angle *window*) 0)
+(setf (z-angle *window*) 0)
+)
+
+(setf *angle-incr* 0.001)
 (funcall (slot-value *curr-shape* 'freq-idx-transform-fn) 511)
 |#
-
-
-
