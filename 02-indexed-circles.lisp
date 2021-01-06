@@ -198,8 +198,7 @@ void main()
                                                      (+ 0.1 (random 0.7))
                                                      0.0)))))
 
-
-(defmethod glut:display-window :before ((w circle-window))
+(defmethod glut:display-window :before ((window circle-window))
   ;; An array buffer can be used to store verex position, colors,
   ;; normals, or other data. We need to allocate an GL array, copy the
   ;; data to the array, and tell OpenGL that the buffers data comes
@@ -209,38 +208,23 @@ void main()
     (glut:destroy-current-window)
     (return-from glut:display-window nil))
   (with-slots (circle-vbo arrowhead-vbo arrowstem-vbo
-               circle-vao
-               offset-buffer shape-buffer
+               circle-vao arrowhead-vao arrowstem-vao
+               offset-buffer angle-buffer shape-buffer
                circle-program arrow-program shape-program
                num)
-      w
-    (let ((buffers (gl:gen-buffers 5)))
-      (setf circle-vbo (elt buffers 0))
-      (setf arrowhead-vbo (elt buffers 1))
-      (setf arrowstem-vbo (elt buffers 2))
-      (setf offset-buffer (elt buffers 3))
-      (setf shape-buffer (elt buffers 4)))
-    (set-vbo-data (:array-buffer :static-draw circle-vbo)
-                  (get-circle-verts 64 0.1))
-    (set-vbo-data (:array-buffer :static-draw arrowhead-vbo) *arrowhead*)
-    (set-vbo-data (:array-buffer :static-draw arrowstem-vbo)
-                  #(0.0 0.002 0.08 0.002 0.08 -0.002 0.0 -0.002))  
-    (set-vbo-data (:array-buffer :dynamic-draw offset-buffer)
-                  (loop for i below num append (list (- (* 0.2 (mod i 10)) 0.9)
-                                                     (- (* 0.2 (mod (floor i 10) 10)) 0.9)
-                                                     (+ 0.1 (random 0.7))
-                                                     0.0)))
-    (set-vbo-data (:array-buffer :dynamic-draw shape-buffer)
-                  (loop for i below num append (list 0.0 0.0 0.0 0.0)))
+      window
+
 
     ;; Vertex array objects manage which vertex attributes are
     ;; associated with which data buffers. 
 
+;;; setup shaders
+
     (let ((circle-vs (gl:create-shader :vertex-shader))
           (arrow-vs (gl:create-shader :vertex-shader))
           (shape-vs (gl:create-shader :vertex-shader))
-          (fs (gl:create-shader :fragment-shader))
-)
+          (fs (gl:create-shader :fragment-shader)))
+      
       (gl:shader-source circle-vs *circle-vertex-shader-program*)
       (gl:compile-shader circle-vs)
       (gl:shader-source arrow-vs *arrow-vertex-shader-program*)
@@ -255,11 +239,50 @@ void main()
             (print (gl:get-shader-info-log circle-vs))
             (print (gl:get-shader-info-log arrow-vs))
             (print (gl:get-shader-info-log fs))))
-      (setf shape-program (gl:create-program))
-      (gl:attach-shader shape-program shape-vs)
+
+;;; setup programs
+
       (setf circle-program (gl:create-program))
+      (format t "circle-program: ~a" circle-program)
       (gl:attach-shader circle-program circle-vs)
       (gl:attach-shader circle-program fs)
+      (gl:link-program circle-program)
+
+      (setf arrow-program (gl:create-program))
+      (gl:attach-shader arrow-program arrow-vs)
+      (gl:attach-shader arrow-program fs)
+      (gl:link-program arrow-program)
+
+      (setf shape-program (gl:create-program))
+      (gl:attach-shader shape-program shape-vs)
+      (gl:attach-shader shape-program fs)
+      (gl:link-program shape-program)
+      
+;;; setup vbos and vaos
+      
+      (let ((buffers (gl:gen-buffers 6)))
+        (setf circle-vbo (elt buffers 0))
+        (setf arrowhead-vbo (elt buffers 1))
+        (setf arrowstem-vbo (elt buffers 2))
+        (setf offset-buffer (elt buffers 3))
+        (setf angle-buffer (elt buffers 4))
+        (setf shape-buffer (elt buffers 5)))
+      (set-vbo-data (:array-buffer :static-draw circle-vbo)
+                    (get-circle-verts 64 0.1))
+      (set-vbo-data (:array-buffer :static-draw arrowhead-vbo) *arrowhead*)
+      (set-vbo-data (:array-buffer :static-draw arrowstem-vbo)
+                    #(0.0 0.002 0.08 0.002 0.08 -0.002 0.0 -0.002))  
+      (set-vbo-data (:array-buffer :dynamic-draw offset-buffer)
+                    (loop for i below num append (list (- (* 0.2 (mod i 10)) 0.9)
+                                                       (- (* 0.2 (mod (floor i 10) 10)) 0.9)
+                                                       0.0
+                                                       (+ 0.1 (random 0.7)))))
+      (set-vbo-data (:array-buffer :dynamic-draw angle-buffer)
+                    (loop for i below num collect 0.0))
+      (set-vbo-data (:array-buffer :dynamic-draw shape-buffer)
+                    (loop for i below num append (list 0.0 0.0 0.0 0.0)))
+      
+
       (setf circle-vao (gl:gen-vertex-array))
       (gl:bind-vertex-array circle-vao)
 
@@ -269,59 +292,89 @@ void main()
       (gl:bind-buffer :array-buffer circle-vbo)
       ;; Using a null pointer as the data source indicates that we want
       ;; the vertex data to come from the currently bound array-buffer.
+      (gl:enable-vertex-attrib-array 0)
       (gl:vertex-attrib-pointer 0 2 :float nil (* 2 +float-size+) (cffi:null-pointer))
 
       ;; In this program, we use attribute 0 for position. If you had
       ;; per-vertex normals, you could use a different attribute for those
       ;; as well.
-      (gl:enable-vertex-attrib-array 0)
       (gl:bind-buffer :array-buffer 0)
 
       (gl:bind-buffer :array-buffer offset-buffer)
-      (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer))
       (gl:enable-vertex-attrib-array 1)
+      (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer))
       (gl:bind-buffer :array-buffer 0)
       (cl-opengl-bindings:vertex-attrib-divisor 1 1)
-      (gl:link-program circle-program)
+      (gl:bind-vertex-array 0)
 
-      (setf (arrow-program w) (gl:create-program))
-      (gl:attach-shader arrow-program arrow-vs)
-      (gl:attach-shader arrow-program fs)
-      (setf (arrowhead-vao w) (gl:gen-vertex-array))
-      (gl:bind-vertex-array (arrowhead-vao w))
+;;; arrowhead setup indexed rendering:
+      
+      (setf arrowhead-vao (gl:gen-vertex-array))
+      (gl:bind-vertex-array arrowhead-vao)
+
       (gl:bind-buffer :array-buffer arrowhead-vbo)
-      (gl:vertex-attrib-pointer 0 2 :float nil (* 2 +float-size+) (cffi:null-pointer))
       (gl:enable-vertex-attrib-array 0)
+      (gl:vertex-attrib-pointer 0 2 :float nil (* 2 +float-size+) (cffi:null-pointer))
       (gl:bind-buffer :array-buffer 0)
+
       (gl:bind-buffer :array-buffer offset-buffer)
-      (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer))
       (gl:enable-vertex-attrib-array 1)
+      (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer))
+      (gl:bind-buffer :array-buffer 0)
+      
+      (gl:bind-buffer :array-buffer angle-buffer)
+      (gl:vertex-attrib-pointer 2 1 :float nil
+                                (* 1 +float-size+) (cffi:null-pointer)) ;;; idx corresponds to position in Vertex shader code
+      (gl:enable-vertex-attrib-array 2) ;;; idx corresponds to position in Vertex shader code
       (gl:bind-buffer :array-buffer 0)
       (cl-opengl-bindings:vertex-attrib-divisor 1 1)
+      (cl-opengl-bindings:vertex-attrib-divisor 2 1)
+      (gl:bind-vertex-array 0)
     
-      (setf (arrowstem-vao w) (gl:gen-vertex-array))
-      (gl:bind-vertex-array (arrowstem-vao w))
+      (setf arrowstem-vao (gl:gen-vertex-array))
+      (gl:bind-vertex-array arrowstem-vao)
       (gl:bind-buffer :array-buffer arrowstem-vbo)
-      (gl:vertex-attrib-pointer 0 2 :float nil (* 2 +float-size+) (cffi:null-pointer))
       (gl:enable-vertex-attrib-array 0)
+      (gl:vertex-attrib-pointer 0 2 :float nil (* 2 +float-size+) (cffi:null-pointer))
       (gl:bind-buffer :array-buffer 0)
       (gl:bind-buffer :array-buffer offset-buffer)
-      (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer))
       (gl:enable-vertex-attrib-array 1)
+      (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer))
+      (gl:bind-buffer :array-buffer 0)
+      (gl:bind-buffer :array-buffer angle-buffer)
+      (gl:vertex-attrib-pointer 2 1 :float nil
+                                (* 1 +float-size+) (cffi:null-pointer)) ;;; idx corresponds to position in Vertex shader code
+      (gl:enable-vertex-attrib-array 2) ;;; idx corresponds to position in Vertex shader code
       (gl:bind-buffer :array-buffer 0)
       (cl-opengl-bindings:vertex-attrib-divisor 1 1)
+      (cl-opengl-bindings:vertex-attrib-divisor 2 1)
+      (gl:bind-vertex-array 0)
 
-      (gl:link-program arrow-program)
+;;; for shape drawing we only need the vbo (and no vao) as we
+;;; are not using indexed rendering (and only use one in?)
+      
+      (gl:bind-buffer :array-buffer shape-buffer)
+      (gl:enable-vertex-attrib-array 0)
+      (gl:vertex-attrib-pointer 0 3 :float nil (* 3 +float-size+) (cffi:null-pointer))
+      (gl:bind-buffer :array-buffer 0)
 
+      (gl:link-program shape-program)
+
+      
       (gl:use-program circle-program)
       (cl-opengl-bindings:uniform-4f (gl:get-uniform-location circle-program "Color") 1.0 0.3 0.0 0.5)
+      (gl:use-program 0)
       (gl:use-program arrow-program)
       (cl-opengl-bindings:uniform-4f (gl:get-uniform-location arrow-program "Color") 0.6 0.6 0.6 1.0)
-      (gl:use-program circle-program)
-
+;;;      (gl:use-program 0)
+      ;; (gl:use-program shape-program)
+      ;; (cl-opengl-bindings:uniform-4f (gl:get-uniform-location shape-program "Color") 0.0 1.0 1.0 1.0)
+;;;      (gl:use-program 0)
       (gl:delete-shader circle-vs)
       (gl:delete-shader arrow-vs)
-      (gl:delete-shader fs))))
+      (gl:delete-shader shape-vs)
+      (gl:delete-shader fs)
+      )))
 
 (defmethod glut:idle ((w circle-window))
   (glut:post-redisplay))
