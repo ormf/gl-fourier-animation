@@ -21,7 +21,7 @@
 (in-package :gl-fourier-animation)
 
 (defconstant +float-size+ 4)
-(defparameter *debug* nil)
+(defparameter *debug* t)
 (defparameter *angle-incr* 0.002)
 (defparameter *window* nil)
 
@@ -101,12 +101,17 @@ main()
 ;;; The phase (aTransform.w) isn't used as the circles doesn't have to
 ;;; be rotated.
 
+"0:15(34): error: vector size mismatch for arithmetic operator
+0:15(29): error: cannot construct `vec4' from a non-numeric data type
+0:15(16): error: operands to arithmetic operators must be numeric
+" 
 (defparameter *circle-vertex-shader-program*
   "
 #version 330 core
 
 layout (location = 0) in vec2 aPos; // The vbo of the shape to draw
-layout (location = 1) in vec4 aTransform;  // the offsets from offset-buffer
+layout (location = 1) in vec4 aOffsetLength;  // The offsets from offset buffer
+// layout (location = 2) in float aAngle;  // The angle (unused here)
 
 uniform mat4 projection;
 // uniform mat4 view;
@@ -115,7 +120,7 @@ uniform mat4 projection;
 void
 main()
 {
-    gl_Position = projection * vec4((aTransform.z*aPos)+aTransform.xy, 0.0, 1.0);
+    gl_Position = projection * vec4((aOffsetLength.w*aPos)+aOffsetLength.xy, aOffsetLength.z, 1.0);
 }
 ")
 
@@ -125,9 +130,9 @@ main()
 ;;; arrow to draw, calculated in realtime for each frame in the
 ;;; glut:display routine:
 ;;;
-;;; aTransform.xy = offset of shape
-;;; aTransform.w = angle
-;;; aTransform.z = length
+;;; aTransform.xyz = offset of shape
+;;; aTransform.w = length
+;;; aAngle = angle
 ;;;
 
 (defparameter *arrow-vertex-shader-program*
@@ -135,7 +140,8 @@ main()
 #version 330 core
 
 layout (location = 0) in vec2 aPos; // The vbo of the shape to draw
-layout (location = 1) in vec4 aTransform;  // The offsets from offset buffer
+layout (location = 1) in vec4 aOffsetLength;  // The offsets from offset buffer
+layout (location = 2) in float aAngle;  // The angle
 
 uniform mat4 projection;
 // uniform mat4 view;
@@ -149,7 +155,7 @@ mat2 rotate2d(float _angle){
 void
 main()
 {
-    gl_Position = projection * vec4((aTransform.z*aPos*rotate2d(aTransform.w))+aTransform.xy, 0.01, 1.0);
+    gl_Position = projection * vec4((aOffsetLength.w*aPos*rotate2d(aAngle))+aOffsetLength.xy, aOffsetLength.z, 1.0);
 }
 ")
 
@@ -229,15 +235,16 @@ void main()
       (gl:compile-shader circle-vs)
       (gl:shader-source arrow-vs *arrow-vertex-shader-program*)
       (gl:compile-shader arrow-vs)
-      (gl:shader-source fs *fragment-shader-program*)
-      (gl:compile-shader fs)
       (gl:shader-source shape-vs *shape-vertex-shader-program*)
       (gl:compile-shader shape-vs)
+      (gl:shader-source fs *fragment-shader-program*)
+      (gl:compile-shader fs)
       ;; If the shader doesn't compile, you can print errors with:
       (if *debug*
           (progn
             (print (gl:get-shader-info-log circle-vs))
             (print (gl:get-shader-info-log arrow-vs))
+            (print (gl:get-shader-info-log shape-vs))
             (print (gl:get-shader-info-log fs))))
 
 ;;; setup programs
@@ -282,6 +289,7 @@ void main()
       (set-vbo-data (:array-buffer :dynamic-draw shape-buffer)
                     (loop for i below num append (list 0.0 0.0 0.0 0.0)))
       
+;;; circle setup indexed rendering:
 
       (setf circle-vao (gl:gen-vertex-array))
       (gl:bind-vertex-array circle-vao)
@@ -424,16 +432,17 @@ void main()
   (update-swank)
   (let ((curr-pos))
     ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
-    (with-slots (angle circle-program circle-vao arrow-program arrowhead-vao arrowstem-vao offset-buffer
+    (with-slots (angle circle-program circle-vao arrow-program arrowhead-vao arrowstem-vao
+                 offset-buffer angle-buffer
                  shape num curr-num zoom
                  x-angle y-angle z-angle) 
         w
-      (setf curr-num 512)
       (continuable          
         (incf angle *angle-incr*)
         (gl-init)
         (gl:bind-buffer :array-buffer offset-buffer)
         (with-slots (freq-idx-transform-fn scale fft) shape
+          (gl:bind-buffer :array-buffer offset-buffer)
           (gl:with-mapped-buffer (p1 :array-buffer :read-write)
             (loop
               for curr-offset = (complex 0.0 0.0) then next-offset
@@ -452,7 +461,14 @@ void main()
                    (setf (cffi:mem-aref p1 :float (+ offs 1)) (float (imagpart curr-offset) 1.0))
                    (setf (cffi:mem-aref p1 :float (+ offs 2)) (float (* 10 (abs (aref fft x))) 1.0))
                    (setf (cffi:mem-aref p1 :float (+ offs 3)) (float (+ (phase (aref fft x)) (* angle idx)) 1.0)))
-              finally (setf curr-pos next-offset))))
+              finally (setf curr-pos next-offset)))
+          (gl:bind-buffer :array-buffer angle-buffer)
+          (gl:with-mapped-buffer (p2 :array-buffer :read-write)
+            (loop
+              for i below curr-num
+              for x = (get-idx i *mode*)
+              for idx = (funcall freq-idx-transform-fn x)
+              do (setf (cffi:mem-aref p2 :float (* i 4)) (float (+ (phase (aref fft x)) (* angle idx)) 1.0)))))
         (gl:matrix-mode :modelview)
         (gl:load-identity)
 ;;;      (glu:perspective 50 (/ (glut:width w) (glut:height w)) -1 1)
