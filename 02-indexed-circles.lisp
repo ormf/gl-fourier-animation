@@ -30,12 +30,6 @@
 ;;; triangle.lisp --- Example usage of vertex and fragment shaders,
 ;;; vertex buffer objects, and vertex array objects
 
-(defmacro with-bound-buffer ((type buffer) &body body)
-  `(progn
-     (gl:bind-buffer ,type ,buffer)
-     ,@body
-     (gl:bind-buffer 0)))
-
 (defmacro with-program ((program) &body body)
   `(progn
      (gl:use-program ,program)
@@ -98,13 +92,9 @@ main()
 ;;; aTransform.w = angle
 ;;; aTransform.z = length
 ;;;
-;;; The phase (aTransform.w) isn't used as the circles doesn't have to
+;;; The phase (aTransform.w) isn't used as the circles don't have to
 ;;; be rotated.
-
-"0:15(34): error: vector size mismatch for arithmetic operator
-0:15(29): error: cannot construct `vec4' from a non-numeric data type
-0:15(16): error: operands to arithmetic operators must be numeric
-" 
+ 
 (defparameter *circle-vertex-shader-program*
   "
 #version 330 core
@@ -158,6 +148,8 @@ main()
     gl_Position = projection * vec4((aOffsetLength.w*aPos*rotate2d(aAngle))+aOffsetLength.xy, aOffsetLength.z, 1.0);
 }
 ")
+
+;;; (02-indexed-circles)
 
 (defparameter *fragment-shader-program*
   "#version 330 core
@@ -452,23 +444,46 @@ void main()
               for idx = (funcall freq-idx-transform-fn x)
               for next-offset = (* (exp (* +i+ idx angle))  (aref fft x))
                 then (+ next-offset (* (exp (* +i+ idx angle)) (aref fft x)))
-              do (let ((offs (* i 4)))
-                   (if *print* (format t "~&~a ~a ~a~%"
-                                       (float (realpart curr-offset) 1.0)
-                                       (float (imagpart curr-offset) 1.0)
-                                       (float (* 1 (abs (aref fft x))) 1.0)))
-                   (setf (cffi:mem-aref p1 :float (+ offs 0)) (float (realpart curr-offset) 1.0))
-                   (setf (cffi:mem-aref p1 :float (+ offs 1)) (float (imagpart curr-offset) 1.0))
-                   (setf (cffi:mem-aref p1 :float (+ offs 2)) (float (* 10 (abs (aref fft x))) 1.0))
-                   (setf (cffi:mem-aref p1 :float (+ offs 3)) (float (+ (phase (aref fft x)) (* angle idx)) 1.0)))
+              do
+                 (let ((offs (* i 4)))
+                   (setf (cffi:mem-aref p1 :float (+ offs 0))
+                         (float (realpart curr-offset) 1.0))
+                   (setf (cffi:mem-aref p1 :float (+ offs 1))
+                         (float (imagpart curr-offset) 1.0))
+                   0.0
+                   (setf (cffi:mem-aref p1 :float (+ offs 3))
+                         (float (* 10 (abs (aref fft x))) 1.0))
+                   
+                   ;; (setf (cffi:mem-aref p1 :float (+ offs 0))
+                   ;;       (float (elt point 0) 1.0))
+                   ;; (setf (cffi:mem-aref p1 :float (+ offs 1))
+                   ;;       (float (elt point 1) 1.0))
+                   ;; (setf (cffi:mem-aref p1 :float (+ offs 2))
+                   ;;       (float 0.0 1.0))
+                   ;; (setf (cffi:mem-aref p1 :float (+ offs 3))
+                   ;;       (float (* 10 (elt point 2)) 1.0))
+                   (if *print* (format t "~&~a: ~a ~a ~a ~a"
+                                       i
+                                       (cffi:mem-aref p1 :float (+ offs 0))
+                                       (cffi:mem-aref p1 :float (+ offs 1))
+                                       (cffi:mem-aref p1 :float (+ offs 2))
+                                       (cffi:mem-aref p1 :float (+ offs 3))))
+                   )
               finally (setf curr-pos next-offset)))
+          (gl:bind-buffer :array-buffer 0)
           (gl:bind-buffer :array-buffer angle-buffer)
           (gl:with-mapped-buffer (p2 :array-buffer :read-write)
             (loop
               for i below curr-num
               for x = (get-idx i *mode*)
               for idx = (funcall freq-idx-transform-fn x)
-              do (setf (cffi:mem-aref p2 :float (* i 4)) (float (+ (phase (aref fft x)) (* angle idx)) 1.0)))))
+              do
+                 (setf (cffi:mem-aref p2 :float i) (float (+ (phase (aref fft x)) (* angle idx)) 1.0))
+;;                 (setf (cffi:mem-aref p2 :float i) (float (elt point 3) 1.0))
+                 (if *print* (format t " ~a~%"
+                                     (cffi:mem-aref p2 :float i)))
+              ))
+          )
         (gl:matrix-mode :modelview)
         (gl:load-identity)
 ;;;      (glu:perspective 50 (/ (glut:width w) (glut:height w)) -1 1)
@@ -479,11 +494,11 @@ void main()
         (gl:rotate y-angle 0 1 0)
         (gl:rotate z-angle 0 0 1)
         (gl:scale zoom (* -1 zoom) zoom)
-        (gl:translate (* -1 (realpart curr-pos)) (* -1 (imagpart curr-pos)) 0)
+;;        (gl:translate (* -1 (realpart curr-pos)) (* -1 (imagpart curr-pos)) 0)
         ;;        (gl:translate 0 0 0)
         (when (circle-program w)
           (let ((proj-mat (gl:get-float :modelview-matrix)))
-;;            (draw-circles proj-mat circle-program circle-vao curr-num)
+            (draw-circles proj-mat circle-program circle-vao curr-num)
             (draw-arrows proj-mat arrow-program arrowhead-vao arrowstem-vao curr-num))))))
   (glut:swap-buffers)
   (gl:finish))
@@ -566,8 +581,20 @@ void main()
 ;;; (02-indexed-circles)
 ;;; (gl:named-buffer-storage)
 
+(defparameter *testvalues*
+  `((0.0 0.0 1.1 0.0)
+    (0.0 0.0 1.3 ,(/ pi 2))
+    (0.0 0 2.0 1.5)))
+
+
 #|
+(progn
+(02-indexed-circles)
+(setf (curr-num *window*) 30))
+
 (setf (angle *window*) 0)
+(setf *print* t)
+(setf *print* nil)
 
 (progn
 (setf (shape *window*) *violinschluessel-512*)
@@ -586,7 +613,6 @@ void main()
 (setf *mode* 2)
 (setf *mode* 3)
 
-(setf (curr-num *window*) 2)
 
 (setf (zoom *window*) 2)
 (setf (x-angle *window*) 45)
@@ -599,6 +625,6 @@ void main()
 (setf (z-angle *window*) 0)
 )
 
-(setf *angle-incr* 0.001)
+(setf *angle-incr* 0.01)
 (funcall (slot-value *curr-shape* 'freq-idx-transform-fn) 511)
 |#
