@@ -36,14 +36,26 @@
      ,@body
      (gl:use-program 0)))
 
+(defmacro with-bound-buffer ((type buffer) &body body)
+  `(progn
+     (gl:bind-buffer ,type ,buffer)
+     ,@body
+     (gl:bind-buffer ,type 0)))
+
+(defmacro with-bound-vertex-array ((vao) &body body)
+  `(progn
+     (gl:bind-vertex-array ,vao)
+     ,@body
+     (gl:bind-vertex-array 0)))
+
 (defclass circle-window (glut:window)
   ((circle-vbo :accessor circle-vbo)
    (arrowhead-vbo :accessor arrowhead-vbo)
    (arrowstem-vbo :accessor arrowstem-vbo)
    (shape-vbo :accessor shape-vbo)
    (coordinate-system-vbo :accessor coordinate-system-vbo)
-   (offset-buffer :accessor offset-buffer)
-   (angle-buffer :accessor angle-buffer)
+   (offset-vbo :accessor offset-vbo)
+   (angle-vbo :accessor angle-vbo)
    (shape-buffer :accessor shape-buffer)
    (circle-vao :accessor circle-vao)
    (arrowhead-vao :accessor arrowhead-vao)
@@ -55,6 +67,8 @@
    (angle :accessor angle :initform 0)
    (curr-num :accessor curr-num :initform 512)
    (curr-path :accessor curr-path :initform nil)
+   (curr-path-idx :accessor curr-path-idx :initform 0)
+   (curr-path-length :accessor curr-path-length :initform 0)
    (zoom :accessor zoom :initform 1)
    (x-angle :accessor x-angle :initform 0)
    (y-angle :accessor y-angle :initform 0)
@@ -75,8 +89,7 @@ layout (location = 0) in vec3 aPos;
 
 uniform mat4 projection;
 
-void
-main()
+void main()
 {
     gl_Position = projection * vec4(aPos.xyz, 1.0);
 }
@@ -173,12 +186,8 @@ void main()
                while pt2
                append (append pt1 pt2))))
 
-(defmacro with-bound-buffer ((type buffer) &body body)
-  `(progn
-     (gl:bind-buffer ,type ,buffer)
-     ,@body
-     (gl:bind-buffer ,type 0)))
 
+#|
 (defmacro set-vbo-data ((type mode buffer) verts)
   `(let* ((arr (gl:alloc-gl-array :float (length ,verts))))
      (dotimes (i (length ,verts))
@@ -187,10 +196,19 @@ void main()
      (gl:buffer-data ,type ,mode arr)
      (gl:free-gl-array arr)
      (gl:bind-buffer ,type 0)))
+|#
+
+(defmacro set-vbo-data ((type mode buffer) verts)
+  `(let* ((arr (gl:alloc-gl-array :float (length ,verts))))
+     (dotimes (i (length ,verts))
+       (setf (gl:glaref arr i) (float (elt ,verts i) 1.0)))
+     (with-bound-buffer (,type ,buffer)
+       (gl:buffer-data ,type ,mode arr))
+     (gl:free-gl-array arr)))
 
 (defun set-offset-data (w)
-  (with-slots (offset-buffer num) w
-    (set-vbo-data (:array-buffer :dynamic-draw offset-buffer)
+  (with-slots (offset-vbo num) w
+    (set-vbo-data (:array-buffer :dynamic-draw offset-vbo)
                   (loop for i below num append (list (- (* 0.2 (mod i 10)) 0.9)
                                                      (- (* 0.2 (mod (floor i 10) 10)) 0.9)
                                                      (+ 0.1 (random 0.7))
@@ -206,13 +224,14 @@ void main()
     (glut:destroy-current-window)
     (return-from glut:display-window nil))
   (with-slots (circle-vbo arrowhead-vbo arrowstem-vbo
+               offset-vbo angle-vbo shape-vbo
                circle-vao arrowhead-vao arrowstem-vao
-               offset-buffer angle-buffer shape-buffer
                circle-program arrow-program shape-program
-               num)
+               curr-path num)
       window
 
-
+    (setf curr-path (make-array (list (* 2 num)) :initial-element (complex 0 1)))
+    
     ;; Vertex array objects manage which vertex attributes are
     ;; associated with which data buffers. 
 
@@ -259,117 +278,119 @@ void main()
       
 ;;; setup vbos and vaos
       
-      (let ((buffers (gl:gen-buffers 6)))
+      (let ((buffers (gl:gen-buffers 7)))
         (setf circle-vbo (elt buffers 0))
         (setf arrowhead-vbo (elt buffers 1))
         (setf arrowstem-vbo (elt buffers 2))
-        (setf offset-buffer (elt buffers 3))
-        (setf angle-buffer (elt buffers 4))
-        (setf shape-buffer (elt buffers 5)))
+        (setf shape-vbo (elt buffers 3))
+        (setf offset-vbo (elt buffers 4))
+        (setf angle-vbo (elt buffers 5)))
       (set-vbo-data (:array-buffer :static-draw circle-vbo)
                     (get-circle-verts 64 0.1))
       (set-vbo-data (:array-buffer :static-draw arrowhead-vbo) *arrowhead*)
       (set-vbo-data (:array-buffer :static-draw arrowstem-vbo)
                     #(0.0 0.002 0.08 0.002 0.08 -0.002 0.0 -0.002))  
-      (set-vbo-data (:array-buffer :dynamic-draw offset-buffer)
+      (set-vbo-data (:array-buffer :dynamic-draw shape-vbo)
+                    (loop for i below num append (list (float (random 1.0) 1.0) (float (random 1.0) 1.0) 0.0)))
+      (set-vbo-data (:array-buffer :dynamic-draw offset-vbo)
                     (loop for i below num append (list (- (* 0.2 (mod i 10)) 0.9)
                                                        (- (* 0.2 (mod (floor i 10) 10)) 0.9)
                                                        0.0
                                                        (+ 0.1 (random 0.7)))))
-      (set-vbo-data (:array-buffer :dynamic-draw angle-buffer)
+      (set-vbo-data (:array-buffer :dynamic-draw angle-vbo)
                     (loop for i below num collect 0.0))
-      (set-vbo-data (:array-buffer :dynamic-draw shape-buffer)
-                    (loop for i below num append (list 0.0 0.0 0.0 0.0)))
+
       
 ;;; circle setup indexed rendering:
 
+;;; a vertex array object (vao) is a custom constellation of vbos,
+;;; like an instance of some struct definition. The actual data is
+;;; contained in the vbos. It gets instantiated with
+;;; gl:gen-vertex-array. The following code instantiates an vao,
+;;; defines the layout of the vbo data in the vao, enables the
+;;; components and finally sets the vertex-attribute-divisor necessary
+;;; for instanced rendering.
+      
       (setf circle-vao (gl:gen-vertex-array))
-      (gl:bind-vertex-array circle-vao)
+      (with-bound-vertex-array (circle-vao)
+        ;; To associate our CIRCLE-VBO data with this VAO, we bind it, specify
+        ;; which vertex attribute we want to associate it with, and specify
+        ;; where the data comes from.
+        (with-bound-buffer (:array-buffer circle-vbo)
+          ;; Using a null pointer as the data source indicates that we want
+          ;; the vertex data to come from the currently bound array-buffer.
+          (gl:enable-vertex-attrib-array 0)
 
-      ;; To associate our CIRCLE-VBO data with this VAO, we bind it, specify
-      ;; which vertex attribute we want to associate it with, and specify
-      ;; where the data comes from.
-      (gl:bind-buffer :array-buffer circle-vbo)
-      ;; Using a null pointer as the data source indicates that we want
-      ;; the vertex data to come from the currently bound array-buffer.
-      (gl:enable-vertex-attrib-array 0)
-      (gl:vertex-attrib-pointer 0 2 :float nil (* 2 +float-size+) (cffi:null-pointer))
-
-      ;; In this program, we use attribute 0 for position. If you had
-      ;; per-vertex normals, you could use a different attribute for those
-      ;; as well.
-      (gl:bind-buffer :array-buffer 0)
-
-      (gl:bind-buffer :array-buffer offset-buffer)
-      (gl:enable-vertex-attrib-array 1)
-      (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer))
-      (gl:bind-buffer :array-buffer 0)
-      (cl-opengl-bindings:vertex-attrib-divisor 1 1)
-      (gl:bind-vertex-array 0)
+        ;;; The vertex-attribute-pointer defines (for the currently
+        ;;; bound vao) the number of values of one element and the
+        ;;; step size to advance for each element in the vbo
+        ;;; referenced by the first arg.
+          (gl:vertex-attrib-pointer 0 2 :float nil (* 2 +float-size+) (cffi:null-pointer)))
+        (with-bound-buffer (:array-buffer offset-vbo)
+          (gl:enable-vertex-attrib-array 1)
+          (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer)))
+        ;;; The following vertex attribute-divisor states, that the
+        ;;; elements (vertices) of the vbo at index 1 should only get
+        ;;; advanced when all vertices upto index 1 have been
+        ;;; processed. The vbo at index 0 contains the vertices of one
+        ;;; circle, the vbo at index 1 contains the offsets and
+        ;;; radiuses of the circles to draw. This means that all
+        ;;; elements of the vbo at index 0 will get evaluated once for
+        ;;; each element of the vbo at index 1 (aka "indexed
+        ;;; rendering").
+        (cl-opengl-bindings:vertex-attrib-divisor 1 1))
 
 ;;; arrowhead setup indexed rendering:
       
       (setf arrowhead-vao (gl:gen-vertex-array))
-      (gl:bind-vertex-array arrowhead-vao)
 
-      (gl:bind-buffer :array-buffer arrowhead-vbo)
-      (gl:enable-vertex-attrib-array 0)
-      (gl:vertex-attrib-pointer 0 2 :float nil (* 2 +float-size+) (cffi:null-pointer))
-      (gl:bind-buffer :array-buffer 0)
-
-      (gl:bind-buffer :array-buffer offset-buffer)
-      (gl:enable-vertex-attrib-array 1)
-      (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer))
-      (gl:bind-buffer :array-buffer 0)
-      
-      (gl:bind-buffer :array-buffer angle-buffer)
-      (gl:vertex-attrib-pointer 2 1 :float nil
-                                (* 1 +float-size+) (cffi:null-pointer)) ;;; idx corresponds to position in Vertex shader code
-      (gl:enable-vertex-attrib-array 2) ;;; idx corresponds to position in Vertex shader code
-      (gl:bind-buffer :array-buffer 0)
-      (cl-opengl-bindings:vertex-attrib-divisor 1 1)
-      (cl-opengl-bindings:vertex-attrib-divisor 2 1)
-      (gl:bind-vertex-array 0)
+      (with-bound-vertex-array (arrowhead-vao)
+        (with-bound-buffer (:array-buffer arrowhead-vbo)
+          (gl:enable-vertex-attrib-array 0)
+          (gl:vertex-attrib-pointer 0 2 :float nil (* 2 +float-size+) (cffi:null-pointer)))
+        (with-bound-buffer (:array-buffer offset-vbo)
+          (gl:enable-vertex-attrib-array 1)
+          (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer)))
+        (with-bound-buffer (:array-buffer angle-vbo)
+          (gl:vertex-attrib-pointer 2 1 :float nil
+                                    (* 1 +float-size+) (cffi:null-pointer)) ;;; idx corresponds to position in Vertex shader code
+          (gl:enable-vertex-attrib-array 2)) ;;; idx corresponds to position in Vertex shader code
+        (cl-opengl-bindings:vertex-attrib-divisor 1 1)
+        (cl-opengl-bindings:vertex-attrib-divisor 2 1))
     
       (setf arrowstem-vao (gl:gen-vertex-array))
-      (gl:bind-vertex-array arrowstem-vao)
-      (gl:bind-buffer :array-buffer arrowstem-vbo)
-      (gl:enable-vertex-attrib-array 0)
-      (gl:vertex-attrib-pointer 0 2 :float nil (* 2 +float-size+) (cffi:null-pointer))
-      (gl:bind-buffer :array-buffer 0)
-      (gl:bind-buffer :array-buffer offset-buffer)
-      (gl:enable-vertex-attrib-array 1)
-      (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer))
-      (gl:bind-buffer :array-buffer 0)
-      (gl:bind-buffer :array-buffer angle-buffer)
-      (gl:vertex-attrib-pointer 2 1 :float nil
-                                (* 1 +float-size+) (cffi:null-pointer)) ;;; idx corresponds to position in Vertex shader code
-      (gl:enable-vertex-attrib-array 2) ;;; idx corresponds to position in Vertex shader code
-      (gl:bind-buffer :array-buffer 0)
-      (cl-opengl-bindings:vertex-attrib-divisor 1 1)
-      (cl-opengl-bindings:vertex-attrib-divisor 2 1)
-      (gl:bind-vertex-array 0)
+      (with-bound-vertex-array (arrowstem-vao)
+        (with-bound-buffer (:array-buffer arrowstem-vbo)
+          (gl:enable-vertex-attrib-array 0)
+          (gl:vertex-attrib-pointer 0 2 :float nil (* 2 +float-size+) (cffi:null-pointer)))
+        (with-bound-buffer (:array-buffer offset-vbo)
+          (gl:enable-vertex-attrib-array 1)
+          (gl:vertex-attrib-pointer 1 4 :float nil (* 4 +float-size+) (cffi:null-pointer)))
+
+        (with-bound-buffer (:array-buffer angle-vbo)
+          (gl:vertex-attrib-pointer 2 1 :float nil
+                                    (* 1 +float-size+) (cffi:null-pointer)) ;;; idx corresponds to position in Vertex shader code
+          (gl:enable-vertex-attrib-array 2)) ;;; idx corresponds to position in Vertex shader code
+
+        (cl-opengl-bindings:vertex-attrib-divisor 1 1)
+        (cl-opengl-bindings:vertex-attrib-divisor 2 1))
 
 ;;; for shape drawing we only need the vbo (and no vao) as we
 ;;; are not using indexed rendering (and only use one in?)
       
-      (gl:bind-buffer :array-buffer shape-buffer)
-      (gl:enable-vertex-attrib-array 0)
-      (gl:vertex-attrib-pointer 0 3 :float nil (* 3 +float-size+) (cffi:null-pointer))
-      (gl:bind-buffer :array-buffer 0)
+      (with-bound-buffer (:array-buffer shape-vbo)
+        (gl:enable-vertex-attrib-array 0)
+        (gl:vertex-attrib-pointer 0 3 :float nil (* 3 +float-size+) (cffi:null-pointer)))
 
       (gl:link-program shape-program)
 
       
-      (gl:use-program circle-program)
-      (cl-opengl-bindings:uniform-4f (gl:get-uniform-location circle-program "Color") 1.0 0.3 0.0 0.5)
-      (gl:use-program 0)
-      (gl:use-program arrow-program)
-      (cl-opengl-bindings:uniform-4f (gl:get-uniform-location arrow-program "Color") 0.6 0.6 0.6 1.0)
-;;;      (gl:use-program 0)
-      ;; (gl:use-program shape-program)
-      ;; (cl-opengl-bindings:uniform-4f (gl:get-uniform-location shape-program "Color") 0.0 1.0 1.0 1.0)
-;;;      (gl:use-program 0)
+      (with-program (circle-program)
+        (cl-opengl-bindings:uniform-4f (gl:get-uniform-location circle-program "Color") 1.0 0.3 0.0 0.5))
+      (with-program (arrow-program)
+        (cl-opengl-bindings:uniform-4f (gl:get-uniform-location arrow-program "Color") 0.6 0.6 0.6 1.0))
+      (gl:use-program shape-program)
+      (cl-opengl-bindings:uniform-4f (gl:get-uniform-location shape-program "Color") 1.0 1.0 0.0 1.0)
       (gl:delete-shader circle-vs)
       (gl:delete-shader arrow-vs)
       (gl:delete-shader shape-vs)
@@ -380,39 +401,39 @@ void main()
   (glut:post-redisplay))
 
 (defun gl-init ()
-      (gl:enable :blend)
-      (gl:blend-func :src-alpha :one)
-      (gl:disable :depth-test)
-      (gl:depth-func :lequal)
+  (gl:enable :blend)
+  (gl:blend-func :src-alpha :one)
+  (gl:disable :depth-test)
+  (gl:depth-func :lequal)
 
-      (gl:clear-color 0 0 0 1.0)
-      (gl:clear :color-buffer-bit :depth-buffer-bit)
-      (gl:line-width 1))
+  (gl:clear-color 0 0 0 1.0)
+  (gl:clear :color-buffer-bit :depth-buffer-bit)
+  (gl:line-width 1))
 
-(defun draw-shape (proj-mat program vao num)
-          (gl:line-width 2)
-          (gl:use-program program)
-          (gl:uniform-matrix 
-           (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
-          (gl:bind-vertex-array vao)
-  (gl:draw-arrays :lines 0 num))
+(defun draw-shape (proj-mat program vbo num)
+  (with-program (program)
+    (gl:line-width 2)
+    (gl:uniform-matrix 
+     (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
+    (with-bound-buffer (:array-buffer vbo)
+      (gl:draw-arrays :lines 0 num))))
 
 (defun draw-circles (proj-mat program vao num)
-          (gl:line-width 2)
-          (gl:use-program program)
-          (gl:uniform-matrix 
-           (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
-          (gl:bind-vertex-array vao)
-          (gl:draw-arrays-instanced :lines 0 129 num))
+  (with-program (program)
+    (gl:line-width 2)
+    (gl:uniform-matrix 
+     (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
+    (gl:bind-vertex-array vao)
+    (gl:draw-arrays-instanced :lines 0 129 num)))
 
 (defun draw-arrows (proj-mat arrow-program arrowhead-vao arrowstem-vao num)
-          (gl:use-program arrow-program)
-          (gl:uniform-matrix
-           (gl:get-uniform-location arrow-program "projection") 4 (vector proj-mat) nil)
-          (gl:bind-vertex-array arrowhead-vao)
-          (gl:draw-arrays-instanced :triangles 0 3 num)
-          (gl:bind-vertex-array arrowstem-vao)
-          (gl:draw-arrays-instanced :quads 0 4 num))
+  (with-program (arrow-program)
+    (gl:uniform-matrix
+     (gl:get-uniform-location arrow-program "projection") 4 (vector proj-mat) nil)
+    (gl:bind-vertex-array arrowhead-vao)
+    (gl:draw-arrays-instanced :triangles 0 3 num)
+    (gl:bind-vertex-array arrowstem-vao)
+    (gl:draw-arrays-instanced :quads 0 4 num)))
 
 
 (defparameter *print* t)
@@ -422,68 +443,86 @@ void main()
 
 (defmethod glut:display ((w circle-window))
   (update-swank)
-  (let ((curr-pos))
+  (let ((curr-pos ))
     ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
-    (with-slots (angle circle-program circle-vao arrow-program arrowhead-vao arrowstem-vao
-                 offset-buffer angle-buffer
+    (with-slots (angle
+                 circle-program circle-vao
+                 arrow-program arrowhead-vao arrowstem-vao
+                 shape-program shape-vbo
+                 offset-vbo angle-vbo
                  shape num curr-num zoom
+                 curr-path curr-path-idx
+                 curr-path-length
                  x-angle y-angle z-angle) 
         w
       (continuable          
         (incf angle *angle-incr*)
+        (setf curr-path-idx (mod (1+ curr-path-idx) num))
         (gl-init)
-        (gl:bind-buffer :array-buffer offset-buffer)
+        (gl:bind-buffer :array-buffer offset-vbo)
         (with-slots (freq-idx-transform-fn scale fft) shape
-          (gl:bind-buffer :array-buffer offset-buffer)
-          (gl:with-mapped-buffer (p1 :array-buffer :read-write)
-            (loop
-              for curr-offset = (complex 0.0 0.0) then next-offset
-              for i below curr-num
-              for n from 0
-              for x = (get-idx i *mode*)
-              for idx = (funcall freq-idx-transform-fn x)
-              for next-offset = (* (exp (* +i+ idx angle))  (aref fft x))
-                then (+ next-offset (* (exp (* +i+ idx angle)) (aref fft x)))
-              do
-                 (let ((offs (* i 4)))
-                   (setf (cffi:mem-aref p1 :float (+ offs 0))
-                         (float (realpart curr-offset) 1.0))
-                   (setf (cffi:mem-aref p1 :float (+ offs 1))
-                         (float (imagpart curr-offset) 1.0))
-                   0.0
-                   (setf (cffi:mem-aref p1 :float (+ offs 3))
-                         (float (* 10 (abs (aref fft x))) 1.0))
-                   
-                   ;; (setf (cffi:mem-aref p1 :float (+ offs 0))
-                   ;;       (float (elt point 0) 1.0))
-                   ;; (setf (cffi:mem-aref p1 :float (+ offs 1))
-                   ;;       (float (elt point 1) 1.0))
-                   ;; (setf (cffi:mem-aref p1 :float (+ offs 2))
-                   ;;       (float 0.0 1.0))
-                   ;; (setf (cffi:mem-aref p1 :float (+ offs 3))
-                   ;;       (float (* 10 (elt point 2)) 1.0))
-                   (if *print* (format t "~&~a: ~a ~a ~a ~a"
-                                       i
-                                       (cffi:mem-aref p1 :float (+ offs 0))
-                                       (cffi:mem-aref p1 :float (+ offs 1))
-                                       (cffi:mem-aref p1 :float (+ offs 2))
-                                       (cffi:mem-aref p1 :float (+ offs 3))))
-                   )
-              finally (setf curr-pos next-offset)))
-          (gl:bind-buffer :array-buffer 0)
-          (gl:bind-buffer :array-buffer angle-buffer)
-          (gl:with-mapped-buffer (p2 :array-buffer :read-write)
-            (loop
-              for i below curr-num
-              for x = (get-idx i *mode*)
-              for idx = (funcall freq-idx-transform-fn x)
-              do
-                 (setf (cffi:mem-aref p2 :float i) (float (+ (phase (aref fft x)) (* angle idx)) 1.0))
-;;                 (setf (cffi:mem-aref p2 :float i) (float (elt point 3) 1.0))
-                 (if *print* (format t " ~a~%"
-                                     (cffi:mem-aref p2 :float i)))
-              ))
-          )
+          (with-bound-buffer (:array-buffer offset-vbo)
+            (gl:with-mapped-buffer (p1 :array-buffer :read-write)
+              (loop
+                for curr-offset = (complex 0.0 0.0) then next-offset
+                for i below curr-num
+                for n from 0
+                for x = (get-idx i *mode*)
+                for idx = (funcall freq-idx-transform-fn x)
+                for next-offset = (* (exp (* +i+ idx angle))  (aref fft x))
+                  then (+ next-offset (* (exp (* +i+ idx angle)) (aref fft x)))
+                do
+                   (let ((offs (* i 4)))
+                     (setf (cffi:mem-aref p1 :float (+ offs 0))
+                           (float (realpart curr-offset) 1.0))
+                     (setf (cffi:mem-aref p1 :float (+ offs 1))
+                           (float (imagpart curr-offset) 1.0))
+                     0.0
+                     (setf (cffi:mem-aref p1 :float (+ offs 3))
+                           (float (* 10 (abs (aref fft x))) 1.0))
+                     
+                     ;; (setf (cffi:mem-aref p1 :float (+ offs 0))
+                     ;;       (float (elt point 0) 1.0))
+                     ;; (setf (cffi:mem-aref p1 :float (+ offs 1))
+                     ;;       (float (elt point 1) 1.0))
+                     ;; (setf (cffi:mem-aref p1 :float (+ offs 2))
+                     ;;       (float 0.0 1.0))
+                     ;; (setf (cffi:mem-aref p1 :float (+ offs 3))
+                     ;;       (float (* 10 (elt point 2)) 1.0))
+                     (if *print* (format t "~&~a: ~a ~a ~a ~a"
+                                         i
+                                         (cffi:mem-aref p1 :float (+ offs 0))
+                                         (cffi:mem-aref p1 :float (+ offs 1))
+                                         (cffi:mem-aref p1 :float (+ offs 2))
+                                         (cffi:mem-aref p1 :float (+ offs 3))))
+                     )
+                finally (progn
+                          (setf curr-pos next-offset)
+                          (setf (aref curr-path curr-path-idx) next-offset)
+                          (setf curr-path-length (min num (1+ curr-path-length)))))))
+          (with-bound-buffer (:array-buffer angle-vbo)
+            (gl:with-mapped-buffer (p2 :array-buffer :read-write)
+              (loop
+                for i below curr-num
+                for x = (get-idx i *mode*)
+                for idx = (funcall freq-idx-transform-fn x)
+                do
+                   (setf (cffi:mem-aref p2 :float i) (float (+ (phase (aref fft x)) (* angle idx)) 1.0))
+                   ;;                 (setf (cffi:mem-aref p2 :float i) (float (elt point 3) 1.0))
+                   (if *print* (format t " ~a~%"
+                                       (cffi:mem-aref p2 :float i))))))
+          (with-bound-buffer (:array-buffer shape-vbo)
+            (gl:with-mapped-buffer (p3 :array-buffer :read-write)
+              (setf (cffi:mem-aref p3 :float (* 3 curr-path-idx)) (float (realpart curr-pos) 1.0))
+              (setf (cffi:mem-aref p3 :float (+ (* 3 curr-path-idx) 1)) (float (imagpart curr-pos) 1.0))
+              (setf (cffi:mem-aref p3 :float (+ (* 3 curr-path-idx) 2)) (float 0.0 1.0))
+              ;; (loop for point in *points*
+              ;;       for idx from 0 by 3
+              ;;       do (progn
+              ;;              (setf (cffi:mem-aref p3 :float idx) (float (elt point 0) 1.0))
+              ;;              (setf (cffi:mem-aref p3 :float (+ idx 1)) (float (elt point 1) 1.0))
+              ;;              (setf (cffi:mem-aref p3 :float (+ idx 2)) (float (elt point 2) 1.0))))
+              )))
         (gl:matrix-mode :modelview)
         (gl:load-identity)
 ;;;      (glu:perspective 50 (/ (glut:width w) (glut:height w)) -1 1)
@@ -494,12 +533,15 @@ void main()
         (gl:rotate y-angle 0 1 0)
         (gl:rotate z-angle 0 0 1)
         (gl:scale zoom (* -1 zoom) zoom)
-;;        (gl:translate (* -1 (realpart curr-pos)) (* -1 (imagpart curr-pos)) 0)
+        ;;        (gl:translate (* -1 (realpart curr-pos)) (* -1 (imagpart curr-pos)) 0)
         ;;        (gl:translate 0 0 0)
-        (when (circle-program w)
+        (when circle-program
           (let ((proj-mat (gl:get-float :modelview-matrix)))
-            (draw-circles proj-mat circle-program circle-vao curr-num)
-            (draw-arrows proj-mat arrow-program arrowhead-vao arrowstem-vao curr-num))))))
+            ;; (draw-circles proj-mat circle-program circle-vao curr-num)
+            ;; (draw-arrows proj-mat arrow-program arrowhead-vao arrowstem-vao curr-num)
+            (draw-shape proj-mat shape-program shape-vbo curr-path-length)
+
+            )))))
   (glut:swap-buffers)
   (gl:finish))
 
@@ -581,13 +623,20 @@ void main()
 ;;; (02-indexed-circles)
 ;;; (gl:named-buffer-storage)
 
+(defparameter *points*
+  `((0 0 0)
+    (1 1 0)))
+
 (defparameter *testvalues*
   `((0.0 0.0 1.1 0.0)
     (0.0 0.0 1.3 ,(/ pi 2))
     (0.0 0 2.0 1.5)))
 
-
 #|
+
+(curr-path *window*)
+
+(curr-path-idx *window*)
 (progn
 (02-indexed-circles)
 (setf (curr-num *window*) 30))
@@ -628,3 +677,5 @@ void main()
 (setf *angle-incr* 0.01)
 (funcall (slot-value *curr-shape* 'freq-idx-transform-fn) 511)
 |#
+
+
