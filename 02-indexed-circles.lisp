@@ -60,6 +60,7 @@
    (circle-vao :accessor circle-vao)
    (arrowhead-vao :accessor arrowhead-vao)
    (arrowstem-vao :accessor arrowstem-vao)
+   (shape-vao :accessor shape-vao)
    (circle-program :accessor circle-program)
    (arrow-program :accessor arrow-program)
    (shape-program :accessor shape-program)
@@ -225,7 +226,7 @@ void main()
     (return-from glut:display-window nil))
   (with-slots (circle-vbo arrowhead-vbo arrowstem-vbo
                offset-vbo angle-vbo shape-vbo
-               circle-vao arrowhead-vao arrowstem-vao
+               circle-vao arrowhead-vao arrowstem-vao shape-vao
                circle-program arrow-program shape-program
                curr-path num)
       window
@@ -378,9 +379,11 @@ void main()
 ;;; for shape drawing we only need the vbo (and no vao) as we
 ;;; are not using indexed rendering (and only use one in?)
       
-      (with-bound-buffer (:array-buffer shape-vbo)
-        (gl:enable-vertex-attrib-array 0)
-        (gl:vertex-attrib-pointer 0 3 :float nil (* 3 +float-size+) (cffi:null-pointer)))
+      (setf shape-vao (gl:gen-vertex-array))
+      (with-bound-vertex-array (shape-vao)
+        (with-bound-buffer (:array-buffer shape-vbo)
+          (gl:enable-vertex-attrib-array 0)
+          (gl:vertex-attrib-pointer 0 3 :float nil 0 (cffi:null-pointer))))
 
       (gl:link-program shape-program)
 
@@ -389,8 +392,8 @@ void main()
         (cl-opengl-bindings:uniform-4f (gl:get-uniform-location circle-program "Color") 1.0 0.3 0.0 0.5))
       (with-program (arrow-program)
         (cl-opengl-bindings:uniform-4f (gl:get-uniform-location arrow-program "Color") 0.6 0.6 0.6 1.0))
-      (gl:use-program shape-program)
-      (cl-opengl-bindings:uniform-4f (gl:get-uniform-location shape-program "Color") 1.0 1.0 0.0 1.0)
+      (with-program (shape-program)
+        (cl-opengl-bindings:uniform-4f (gl:get-uniform-location shape-program "Color") 1.0 1.0 0.0 1.0))
       (gl:delete-shader circle-vs)
       (gl:delete-shader arrow-vs)
       (gl:delete-shader shape-vs)
@@ -410,12 +413,12 @@ void main()
   (gl:clear :color-buffer-bit :depth-buffer-bit)
   (gl:line-width 1))
 
-(defun draw-shape (proj-mat program vbo num)
+(defun draw-shape (proj-mat program vao num)
   (with-program (program)
     (gl:line-width 2)
     (gl:uniform-matrix 
      (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
-    (with-bound-buffer (:array-buffer vbo)
+    (with-bound-vertex-array (vao)
       (gl:draw-arrays :lines 0 num))))
 
 (defun draw-circles (proj-mat program vao num)
@@ -423,8 +426,8 @@ void main()
     (gl:line-width 2)
     (gl:uniform-matrix 
      (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
-    (gl:bind-vertex-array vao)
-    (gl:draw-arrays-instanced :lines 0 129 num)))
+    (with-bound-vertex-array (vao)
+      (gl:draw-arrays-instanced :lines 0 129 num))))
 
 (defun draw-arrows (proj-mat arrow-program arrowhead-vao arrowstem-vao num)
   (with-program (arrow-program)
@@ -432,8 +435,8 @@ void main()
      (gl:get-uniform-location arrow-program "projection") 4 (vector proj-mat) nil)
     (gl:bind-vertex-array arrowhead-vao)
     (gl:draw-arrays-instanced :triangles 0 3 num)
-    (gl:bind-vertex-array arrowstem-vao)
-    (gl:draw-arrays-instanced :quads 0 4 num)))
+    (with-bound-vertex-array (arrowstem-vao)
+      (gl:draw-arrays-instanced :quads 0 4 num))))
 
 
 (defparameter *print* t)
@@ -443,13 +446,13 @@ void main()
 
 (defmethod glut:display ((w circle-window))
   (update-swank)
-  (let ((curr-pos ))
+  (let ((last-path-idx))
     ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
     (with-slots (angle
                  circle-program circle-vao
                  arrow-program arrowhead-vao arrowstem-vao
-                 shape-program shape-vbo
-                 offset-vbo angle-vbo
+                 shape-program shape-vao
+                 offset-vbo angle-vbo shape-vbo
                  shape num curr-num zoom
                  curr-path curr-path-idx
                  curr-path-length
@@ -537,36 +540,44 @@ void main()
         ;;        (gl:translate 0 0 0)
         (when circle-program
           (let ((proj-mat (gl:get-float :modelview-matrix)))
-            ;; (draw-circles proj-mat circle-program circle-vao curr-num)
-            ;; (draw-arrows proj-mat arrow-program arrowhead-vao arrowstem-vao curr-num)
-            (draw-shape proj-mat shape-program shape-vbo curr-path-length)
+            (draw-circles proj-mat circle-program circle-vao curr-num)
+            (draw-arrows proj-mat arrow-program arrowhead-vao arrowstem-vao curr-num)
+;;            (draw-shape proj-mat shape-program shape-vbo curr-path-length)
+            (draw-shape proj-mat shape-program shape-vao curr-num)
 
             )))))
   (glut:swap-buffers)
   (gl:finish))
 
 (defmethod glut:reshape ((w circle-window) width height)
-  (gl:viewport 0 0 (min width height) (min width height))
-  (gl:matrix-mode :modelview)
-  ;; Ensure that projection matrix ratio always matches the window size ratio,
-  ;; so the polygon will always look square.
-  (gl:load-identity)
+  (with-slots (circle-program arrow-program shape-program) w
+    (gl:viewport 0 0 (min width height) (min width height))
+    (gl:matrix-mode :modelview)
+    ;; Ensure that projection matrix ratio always matches the window size ratio,
+    ;; so the polygon will always look square.
+    (gl:load-identity)
 ;;; (glu:perspective 50 (/ (glut:width window) (glut:height window)) -1 1)
 ;;; (gl:ortho 0 width 0 height -1 1)
 ;;; (gl:translate (* (- 1 gl-scale) gl-width) (* (- 1 gl-scale) gl-height) 0.0)
-  (gl:scale 1 1 1)
-  (gl:ortho -1 1 -1 1 -1 1)
-  (when (circle-program w)
-    (let ((proj-mat (gl:get-float :modelview-matrix)))
-      (gl:uniform-matrix 
-       (gl:get-uniform-location (circle-program w) "projection") 
-       4 (vector proj-mat) nil)))
-  (when (arrow-program w)
-    (let ((proj-mat (gl:get-float :modelview-matrix)))
-      (gl:uniform-matrix 
-       (gl:get-uniform-location (arrow-program w) "projection") 4 (vector proj-mat) nil)))
-  (gl:matrix-mode :modelview)
-  (gl:load-identity))
+    (gl:scale 1 1 1)
+    (gl:ortho -1 1 -1 1 -1 1)
+    (when circle-program
+      (with-program (circle-program)
+        (gl:uniform-matrix 
+         (gl:get-uniform-location circle-program "projection") 
+         4 (vector (gl:get-float :modelview-matrix)) nil)))
+    (when arrow-program
+      (with-program (arrow-program)
+        (gl:uniform-matrix 
+         (gl:get-uniform-location arrow-program "projection") 
+         4 (vector (gl:get-float :modelview-matrix)) nil)))
+    (when shape-program
+      (with-program (shape-program)
+        (gl:uniform-matrix 
+         (gl:get-uniform-location shape-program "projection") 
+         4 (vector (gl:get-float :modelview-matrix)) nil)))
+    (gl:matrix-mode :modelview)
+    (gl:load-identity)))
 
 (defmethod glut:mouse ((window circle-window) button state x y)
   (continuable
@@ -677,5 +688,4 @@ void main()
 (setf *angle-incr* 0.01)
 (funcall (slot-value *curr-shape* 'freq-idx-transform-fn) 511)
 |#
-
 
