@@ -48,6 +48,13 @@
   (let ((ept (expt 10 prec)))
     (/ (round (* num ept)) ept 1.0)))
 
+(defun slurp-string (filename)
+  (with-open-file (stream filename)
+    (with-output-to-string (str)
+      (loop for line = (read-line stream nil)
+         while line
+         do (format str "~a~%" line)))))
+
 (defun make-path (&rest coords)
   (loop for (x y) on coords by #'cddr while y collect (complex x y)))
 

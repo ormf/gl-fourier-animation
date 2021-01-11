@@ -51,6 +51,8 @@
 
 (defclass circle-window (glut:window)
   ((angle-incr :accessor angle-incr :initform 0.02)
+   (grid-vbo :accessor grid-vbo)
+   (grid-vao :accessor grid-vao)
    (circle-vbo :accessor circle-vbo)
    (arrowhead-vbo :accessor arrowhead-vbo)
    (arrowstem-vbo :accessor arrowstem-vbo)
@@ -82,106 +84,6 @@
   (:default-initargs :width 400 :height 400 :pos-x 100 :pos-y 100
 		     :mode '(:double :rgb :depth) :title "02-circles.lisp"))
 
-;;; program for drawing the shape: location = 0 contain the 3D
-;;; vertexes of the shape, calculated in realtime for each frame in
-;;; the glut:display routine.
-
-(defparameter *shape-vertex-shader-program*
-  "
-#version 330 core
-
-layout (location = 0) in vec3 aPos;
-
-uniform mat4 projection;
-
-void main()
-{
-    gl_Position = projection * vec4(aPos.xyz, 1.0);
-}
-")
-
-;;; program for indexed drawing: location = 0 contain the vertexes of
-;;; one circle (precalculated once in the display-window :before
-;;; method), location = 1 contain the offsets/length/angle for each
-;;; circle to draw, calculated in realtime for each frame in the
-;;; glut:display routine:
-;;;
-;;; aTransform.xy = offset of shape
-;;; aTransform.w = angle
-;;; aTransform.z = length
-;;;
-;;; The phase (aTransform.w) isn't used as the circles don't have to
-;;; be rotated.
- 
-(defparameter *circle-vertex-shader-program*
-  "
-#version 330 core
-
-layout (location = 0) in vec2 aPos; // The vbo of the shape to draw
-layout (location = 1) in vec4 aOffsetLength;  // The offsets from offset buffer
-// layout (location = 2) in float aAngle;  // The angle (unused here)
-
-uniform mat4 projection;
-// uniform mat4 view;
-// uniform mat4 model;
-
-void
-main()
-{
-    gl_Position = projection * vec4((aOffsetLength.w*aPos)+aOffsetLength.xy, aOffsetLength.z, 1.0);
-}
-")
-
-;;; program for indexed drawing: location = 0 contain the vertexes of
-;;; one arrow (precalculated once in the display-window :before
-;;; method), location = 1 contain the offsets/length/angle for each
-;;; arrow to draw, calculated in realtime for each frame in the
-;;; glut:display routine:
-;;;
-;;; aTransform.xyz = offset of shape
-;;; aTransform.w = length
-;;; aAngle = angle
-;;;
-
-(defparameter *arrow-vertex-shader-program*
-  "
-#version 330 core
-
-layout (location = 0) in vec2 aPos; // The vbo of the shape to draw
-layout (location = 1) in vec4 aOffsetLength;  // The offsets from offset buffer
-layout (location = 2) in float aAngle;  // The angle
-
-uniform mat4 projection;
-// uniform mat4 view;
-// uniform mat4 model;
-
-mat2 rotate2d(float _angle){
-    return mat2(cos(_angle),-sin(_angle),
-                sin(_angle),cos(_angle));
-}
-
-void
-main()
-{
-    gl_Position = projection * vec4((aOffsetLength.w*aPos*rotate2d(aAngle))+aOffsetLength.xy, aOffsetLength.z, 1.0);
-}
-")
-
-;;; (02-indexed-circles)
-
-(defparameter *fragment-shader-program*
-  "#version 330 core
-
-out vec4 fColor;
-
-uniform vec4 Color = vec4(1.0, 1.0, 1.0, 1.0);
-
-void main()
-{
-    fColor = Color;
-}
-")
-
 (defun get-circle-verts (num radius)
   (apply #'vector ;;; circle around #(0 0)
          (loop for (pt1 pt2) on (loop for x below (1+ num)
@@ -191,17 +93,20 @@ void main()
                while pt2
                append (append pt1 pt2))))
 
+(defun get-grid-verts (num &key (scale 1.0))
+  "get vertices of a coordinate grid plane extending from (0.0 0.0) to (scale scale)."
+  (apply #'vector
+         (append
+          (loop
+            with distance = (/ scale num)
+            for x below (1+ num)
+            append (list
+                    (float (* x distance) 1.0) 0.0
+                    (float (* x distance) 1.0) (float scale 1.0)
+                    0.0 (float (* x distance) 1.0)
+                    (float scale 1.0) (float (* x distance) 1.0))))))
 
-#|
-(defmacro set-vbo-data ((type mode buffer) verts)
-  `(let* ((arr (gl:alloc-gl-array :float (length ,verts))))
-     (dotimes (i (length ,verts))
-       (setf (gl:glaref arr i) (float (elt ,verts i) 1.0)))
-     (gl:bind-buffer ,type ,buffer)
-     (gl:buffer-data ,type ,mode arr)
-     (gl:free-gl-array arr)
-     (gl:bind-buffer ,type 0)))
-|#
+;;; (get-grid-verts 10)
 
 (defmacro set-vbo-data ((type mode buffer) verts)
   `(let* ((arr (gl:alloc-gl-array :float (length ,verts))))
@@ -229,7 +134,7 @@ void main()
     (glut:destroy-current-window)
     (return-from glut:display-window nil))
   (with-slots (circle-vbo arrowhead-vbo arrowstem-vbo
-               offset-vbo angle-vbo shape-vbo
+               offset-vbo angle-vbo shape-vbo grid-vbo
                circle-vao arrowhead-vao arrowstem-vao shape-vao
                circle-program arrow-program shape-program
                curr-path num shape-max-size)
@@ -247,13 +152,13 @@ void main()
           (shape-vs (gl:create-shader :vertex-shader))
           (fs (gl:create-shader :fragment-shader)))
       
-      (gl:shader-source circle-vs *circle-vertex-shader-program*)
+      (gl:shader-source circle-vs (slurp-string "./glsl/circle-vertex-shader.glsl"))
       (gl:compile-shader circle-vs)
-      (gl:shader-source arrow-vs *arrow-vertex-shader-program*)
+      (gl:shader-source arrow-vs (slurp-string "./glsl/arrow-vertex-shader.glsl"))
       (gl:compile-shader arrow-vs)
-      (gl:shader-source shape-vs *shape-vertex-shader-program*)
+      (gl:shader-source shape-vs (slurp-string "./glsl/shape-vertex-shader.glsl"))
       (gl:compile-shader shape-vs)
-      (gl:shader-source fs *fragment-shader-program*)
+      (gl:shader-source fs (slurp-string "./glsl/fragment-shader.glsl"))
       (gl:compile-shader fs)
       ;; If the shader doesn't compile, you can print errors with:
       (if *debug*
@@ -283,13 +188,17 @@ void main()
       
 ;;; setup vbos and vaos
       
-      (let ((buffers (gl:gen-buffers 7)))
-        (setf circle-vbo (elt buffers 0))
-        (setf arrowhead-vbo (elt buffers 1))
-        (setf arrowstem-vbo (elt buffers 2))
-        (setf shape-vbo (elt buffers 3))
-        (setf offset-vbo (elt buffers 4))
-        (setf angle-vbo (elt buffers 5)))
+      (let ((buffers (gl:gen-buffers 8)))
+        (setf grid-vbo (elt buffers 0))
+        (setf circle-vbo (elt buffers 1))
+        (setf arrowhead-vbo (elt buffers 2))
+        (setf arrowstem-vbo (elt buffers 3))
+        (setf shape-vbo (elt buffers 4))
+        (setf offset-vbo (elt buffers 5))
+        (setf angle-vbo (elt buffers 6))
+        )
+      (set-vbo-data (:array-buffer :static-draw grid-vbo)
+                    (get-grid-verts 10))
       (set-vbo-data (:array-buffer :static-draw circle-vbo)
                     (get-circle-verts 64 0.1))
       (set-vbo-data (:array-buffer :static-draw arrowhead-vbo) *arrowhead*)
@@ -449,7 +358,7 @@ void main()
 (defmethod glut:display ((w circle-window))
   (update-swank)
   (if *draw?*
-      (let (curr-pos (my-num 1))
+      (let (curr-pos (my-num 10))
         ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
         (with-slots (angle
                      circle-program circle-vao
