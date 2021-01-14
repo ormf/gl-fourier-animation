@@ -27,9 +27,6 @@
 
 (defparameter *arrowhead* '(0.08 0.0075 0.1 0.0 0.08 -0.0075))
 
-;;; triangle.lisp --- Example usage of vertex and fragment shaders,
-;;; vertex buffer objects, and vertex array objects
-
 (defmacro with-program ((program) &body body)
   `(progn
      (gl:use-program ,program)
@@ -80,7 +77,12 @@
    (x-angle :accessor x-angle :initform 0)
    (y-angle :accessor y-angle :initform 0)
    (z-angle :accessor z-angle :initform 0)
-   (shape :accessor shape :type (or null ) :initform nil)) 
+   (shape :accessor shape :type (or null ) :initform nil)
+   (mouse-start-x-angle :accessor mouse-start-x-angle :initform 0)
+   (mouse-start-y-angle :accessor mouse-start-y-angle :initform 0)
+   (mouse-start-z-angle :accessor mouse-start-z-angle :initform 0)
+   (mouse-start-x :accessor mouse-start-x :type float :initform 0.0)
+   (mouse-start-y :accessor mouse-start-y :type float :initform 0.0)) 
   (:default-initargs :width 400 :height 400 :pos-x 100 :pos-y 100
 		     :mode '(:double :rgb :depth) :title "02-circles.lisp"))
 
@@ -332,13 +334,14 @@
     (cl-opengl-bindings:uniform-4f (gl:get-uniform-location program "Color") 1.0 1.0 0.0 1.0)
     (gl:uniform-matrix 
      (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
+    (gl:translate 0 0.5 0)
     (with-bound-vertex-array (vao)
       (gl:draw-arrays :lines 0 (* 2 num)))))
 
 (defun draw-grid (proj-mat program vao num)
   (with-program (program)
     (gl:line-width 2)
-    (cl-opengl-bindings:uniform-4f (gl:get-uniform-location program "Color") 0.5 0.5 1.0 1.0)
+    (cl-opengl-bindings:uniform-4f (gl:get-uniform-location program "Color") 0.5 0.5 1.0 0.4)
     (gl:uniform-matrix 
      (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
     (with-bound-vertex-array (vao)
@@ -514,7 +517,9 @@
          (gl:get-uniform-location shape-program "projection") 
          4 (vector (gl:get-float :modelview-matrix)) nil)))
     (gl:matrix-mode :modelview)
-    (gl:load-identity)))
+    (gl:load-identity)
+    (setf (glut:width w) width)
+    (setf (glut:height w) height)))
 
 (defmethod glut:mouse ((window circle-window) button state x y)
   (continuable
@@ -525,7 +530,13 @@
 ;;;    (format t "~a ~a ~S~%" button state (equal (list :active-ctrl) (glut:get-modifiers)))
     (case button
       (:left-button
-       (when (eql state :down)))
+       (when (and (null (glut:get-modifiers)) (eql state :down))
+         (setf (mouse-start-x window) x)
+         (setf (mouse-start-y window) y)
+         (setf (mouse-start-x-angle window) (x-angle window))
+         (setf (mouse-start-y-angle window) (y-angle window))
+         (setf (mouse-start-z-angle window) (z-angle window))
+         ))
       (:wheel-down (when (and (equal (list :active-ctrl) (glut:get-modifiers))
                               (eql state :down))
                      (setf (zoom window) (* (zoom window) 95/100))))
@@ -544,6 +555,16 @@
     ;;   (format t "added boid system, ~s total~%" (length (systems window)))
     ;;   (format t " = ~:d boids~%" (reduce #'+ (systems window) :key 'boid-count)))
     ))
+
+(defmethod glut:motion ((window circle-window) x y)
+  (continuable
+    (let* ((scale (/ 180 (min (glut:height window) (glut:width window))))
+           (dx (* (- x (mouse-start-x window)) scale))
+           (dy (* (- y (mouse-start-y window)) scale)))
+      (setf (y-angle window) (+ (mouse-start-y-angle window) dx))
+      (setf (x-angle window) (+ (mouse-start-x-angle window) dy))
+;;; (format t "dx: ~,2f dy: ~,2f ~,2f ~,2f ~,6f~%" dx dy (glut:width window) (glut:height window) (/ (min (glut:height window) (glut:width window))));
+      )))
 
 (defmethod glut:keyboard ((w circle-window) key x y)
   (declare (ignore x y))
