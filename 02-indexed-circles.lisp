@@ -21,12 +21,11 @@
 (in-package :gl-fourier-animation)
 
 (defconstant +float-size+ 4)
+(defparameter *gl-scale* 5)
 (defparameter *debug* t)
-;;(defparameter *angle-incr* 0.002)
-;;(defparameter *shape-max-size* 1024)
 (defparameter *window* nil)
 
-(defparameter *arrowhead* #(0.08 0.0075 0.1 0.0 0.08 -0.0075))
+(defparameter *arrowhead* '(0.08 0.0075 0.1 0.0 0.08 -0.0075))
 
 ;;; triangle.lisp --- Example usage of vertex and fragment shaders,
 ;;; vertex buffer objects, and vertex array objects
@@ -50,9 +49,10 @@
      (gl:bind-vertex-array 0)))
 
 (defclass circle-window (glut:window)
-  ((angle-incr :accessor angle-incr :initform 0.02)
+  ((angle-incr :accessor angle-incr :initform 0.002)
    (grid-vbo :accessor grid-vbo)
    (grid-vao :accessor grid-vao)
+   (grid-vbo-size :accessor grid-vbo-size)
    (circle-vbo :accessor circle-vbo)
    (arrowhead-vbo :accessor arrowhead-vbo)
    (arrowstem-vbo :accessor arrowstem-vbo)
@@ -93,18 +93,21 @@
                while pt2
                append (append pt1 pt2))))
 
-(defun get-grid-verts (num &key (scale 1.0))
-  "get vertices of a coordinate grid plane extending from (0.0 0.0) to (scale scale)."
-  (apply #'vector
-         (append
-          (loop
-            with distance = (/ scale num)
-            for x below (1+ num)
-            append (list
-                    (float (* x distance) 1.0) 0.0
-                    (float (* x distance) 1.0) (float scale 1.0)
-                    0.0 (float (* x distance) 1.0)
-                    (float scale 1.0) (float (* x distance) 1.0))))))
+(defun get-grid-verts (range distance)
+  "get 3D vertices of a coordinate grid plane extending from (0.0 0.0 0.0) to (scale scale 0.0)."
+  (destructuring-bind (min-x min-y max-x max-y) range
+    (apply #'vector
+           (append
+            (loop
+              for x from min-x to max-x by distance
+              append (list
+                      (float x 1.0) (float min-y 1.0) -0.01
+                      (float x 1.0) (float max-y 1.0) -0.01))
+            (loop
+              for y from min-y to max-y by distance
+              append (list
+                      (float min-x 1.0) (float y 1.0) 0.0
+                      (float max-x 1.0) (float y 1.0) 0.0))))))
 
 ;;; (get-grid-verts 10)
 
@@ -134,7 +137,7 @@
     (glut:destroy-current-window)
     (return-from glut:display-window nil))
   (with-slots (circle-vbo arrowhead-vbo arrowstem-vbo
-               offset-vbo angle-vbo shape-vbo grid-vbo
+               offset-vbo angle-vbo shape-vbo grid-vbo grid-vbo-size grid-vao
                circle-vao arrowhead-vao arrowstem-vao shape-vao
                circle-program arrow-program shape-program
                curr-path num shape-max-size)
@@ -152,13 +155,13 @@
           (shape-vs (gl:create-shader :vertex-shader))
           (fs (gl:create-shader :fragment-shader)))
       
-      (gl:shader-source circle-vs (slurp-string "./glsl/circle-vertex-shader.glsl"))
+      (gl:shader-source circle-vs (glsl-source "circle-vertex-shader.glsl"))
       (gl:compile-shader circle-vs)
-      (gl:shader-source arrow-vs (slurp-string "./glsl/arrow-vertex-shader.glsl"))
+      (gl:shader-source arrow-vs (glsl-source "arrow-vertex-shader.glsl"))
       (gl:compile-shader arrow-vs)
-      (gl:shader-source shape-vs (slurp-string "./glsl/shape-vertex-shader.glsl"))
+      (gl:shader-source shape-vs (glsl-source "shape-vertex-shader.glsl"))
       (gl:compile-shader shape-vs)
-      (gl:shader-source fs (slurp-string "./glsl/fragment-shader.glsl"))
+      (gl:shader-source fs (glsl-source "fragment-shader.glsl"))
       (gl:compile-shader fs)
       ;; If the shader doesn't compile, you can print errors with:
       (if *debug*
@@ -171,7 +174,6 @@
 ;;; setup programs
 
       (setf circle-program (gl:create-program))
-      (format t "circle-program: ~a" circle-program)
       (gl:attach-shader circle-program circle-vs)
       (gl:attach-shader circle-program fs)
       (gl:link-program circle-program)
@@ -195,20 +197,20 @@
         (setf arrowstem-vbo (elt buffers 3))
         (setf shape-vbo (elt buffers 4))
         (setf offset-vbo (elt buffers 5))
-        (setf angle-vbo (elt buffers 6))
-        )
-      (set-vbo-data (:array-buffer :static-draw grid-vbo)
-                    (get-grid-verts 10))
+        (setf angle-vbo (elt buffers 6)))
+      (let ((verts (get-grid-verts '(-5 -5 5 5) (* *gl-scale* 0.1))))
+        (set-vbo-data (:array-buffer :static-draw grid-vbo) verts)
+        (setf  grid-vbo-size (/ (length verts) 6)))
       (set-vbo-data (:array-buffer :static-draw circle-vbo)
-                    (get-circle-verts 64 0.1))
-      (set-vbo-data (:array-buffer :static-draw arrowhead-vbo) *arrowhead*)
+                    (get-circle-verts 64 (* *gl-scale* 0.1)))
+      (set-vbo-data (:array-buffer :static-draw arrowhead-vbo)
+                    (apply #'vector (mapcar (lambda (v) (* v *gl-scale*)) *arrowhead*)))
       (set-vbo-data (:array-buffer :static-draw arrowstem-vbo)
-                    #(0.0 0.002 0.08 0.002 0.08 -0.002 0.0 -0.002))  
+                    (apply #'vector (mapcar (lambda (v) (* v *gl-scale*)) '(0.0 0.002 0.08 0.002 0.08 -0.002 0.0 -0.002))))
       (set-vbo-data (:array-buffer :dynamic-draw shape-vbo)
                     (loop for i below (* 2 shape-max-size) append (list (float (random 1.0) 1.0) (float (random 1.0) 1.0) 0.0)))
       (set-vbo-data (:array-buffer :dynamic-draw offset-vbo)
-                    (loop for i below num append
-                                                     (list 0.0 0.0 0.0 0.0)))
+                    (loop for i below num append (list 0.0 0.0 0.0 0.0)))
       (set-vbo-data (:array-buffer :dynamic-draw angle-vbo)
                     (loop for i below num collect 0.0))
 
@@ -287,16 +289,17 @@
         (cl-opengl-bindings:vertex-attrib-divisor 1 1)
         (cl-opengl-bindings:vertex-attrib-divisor 2 1))
 
-;;; for shape drawing we only need the vbo (and no vao) as we
-;;; are not using indexed rendering (and only use one in?)
-      
       (setf shape-vao (gl:gen-vertex-array))
       (with-bound-vertex-array (shape-vao)
         (with-bound-buffer (:array-buffer shape-vbo)
           (gl:enable-vertex-attrib-array 0)
           (gl:vertex-attrib-pointer 0 3 :float nil (* 3 +float-size+) (cffi:null-pointer))))
 
-      (gl:link-program shape-program)
+      (setf grid-vao (gl:gen-vertex-array))
+      (with-bound-vertex-array (grid-vao)
+        (with-bound-buffer (:array-buffer grid-vbo)
+          (gl:enable-vertex-attrib-array 0)
+          (gl:vertex-attrib-pointer 0 3 :float nil (* 3 +float-size+) (cffi:null-pointer))))
 
       
       (with-program (circle-program)
@@ -308,8 +311,7 @@
       (gl:delete-shader circle-vs)
       (gl:delete-shader arrow-vs)
       (gl:delete-shader shape-vs)
-      (gl:delete-shader fs)
-      )))
+      (gl:delete-shader fs))))
 
 (defmethod glut:idle ((w circle-window))
   (glut:post-redisplay))
@@ -327,6 +329,16 @@
 (defun draw-shape (proj-mat program vao num)
   (with-program (program)
     (gl:line-width 2)
+    (cl-opengl-bindings:uniform-4f (gl:get-uniform-location program "Color") 1.0 1.0 0.0 1.0)
+    (gl:uniform-matrix 
+     (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
+    (with-bound-vertex-array (vao)
+      (gl:draw-arrays :lines 0 (* 2 num)))))
+
+(defun draw-grid (proj-mat program vao num)
+  (with-program (program)
+    (gl:line-width 2)
+    (cl-opengl-bindings:uniform-4f (gl:get-uniform-location program "Color") 0.5 0.5 1.0 1.0)
     (gl:uniform-matrix 
      (gl:get-uniform-location program "projection") 4 (vector proj-mat) nil)
     (with-bound-vertex-array (vao)
@@ -358,12 +370,12 @@
 (defmethod glut:display ((w circle-window))
   (update-swank)
   (if *draw?*
-      (let (curr-pos (my-num 10))
+      (let (curr-pos)
         ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
         (with-slots (angle
                      circle-program circle-vao
                      arrow-program arrowhead-vao arrowstem-vao
-                     shape-program shape-vao
+                     shape-program shape-vao grid-vao grid-vbo-size
                      offset-vbo angle-vbo shape-vbo
                      shape num curr-num zoom
                      curr-path curr-path-idx
@@ -379,20 +391,20 @@
                 (gl:with-mapped-buffer (p1 :array-buffer :read-write)
                   (loop
                     for curr-offset = (complex 0.0 0.0) then next-offset
-                    for i below my-num
+                    for i below curr-num
                     for n from 0
                     for x = (get-idx i *mode*)
                     for idx = (funcall freq-idx-transform-fn x)
-                    for next-offset = (* (exp (* +i+ idx angle))  (aref fft x))
-                      then (+ next-offset (* (exp (* +i+ idx angle)) (aref fft x)))
+                    for next-offset = (* *gl-scale* (exp (* +i+ idx angle))  (aref fft x))
+                      then (+ next-offset (* *gl-scale* (exp (* +i+ idx angle)) (aref fft x)))
                     do
                        (let ((offs (* i 4)))
                          (setf (cffi:mem-aref p1 :float (+ offs 0))
                                (float (realpart curr-offset) 1.0))
                          (setf (cffi:mem-aref p1 :float (+ offs 1))
                                (float (imagpart curr-offset) 1.0))
-                         (setf (cffi:mem-aref p1 :float (+ offs 2))
-                               (float (/ (max 0 angle) (* 2 pi)) 1.0))
+                         ;; (setf (cffi:mem-aref p1 :float (+ offs 2)) (float (/ (max 0 angle) (* 2 pi)) 1.0))
+                         0.01
                          (setf (cffi:mem-aref p1 :float (+ offs 3))
                                (float (* 10 (abs (aref fft x))) 1.0))
                          
@@ -418,7 +430,7 @@
               (with-bound-buffer (:array-buffer angle-vbo)
                 (gl:with-mapped-buffer (p2 :array-buffer :read-write)
                   (loop
-                    for i below my-num
+                    for i below curr-num
                     for x = (get-idx i *mode*)
                     for idx = (funcall freq-idx-transform-fn x)
                     do
@@ -449,22 +461,24 @@
             (setf last-pos curr-pos)
             (gl:matrix-mode :modelview)
             (gl:load-identity)
-;;;      (glu:perspective 50 (/ (glut:width w) (glut:height w)) -1 1)
-;;;      (gl:ortho 0 (glut:width w) 0 (glut:height w) -1 1)
+;;;            (glu:perspective 100 (/ (glut:width w) (glut:height w)) -10 1)
+;;;            (gl:ortho 0 (glut:width w) 0 (glut:height w) -1 1)
 ;;; (gl:translate (* (- 1 1) gl-width) (* (- 1 1) gl-height) 0.0)
+            (gl:translate 0 0 0)
+            (gl:scale zoom (* -1 zoom) zoom)
 
             (gl:rotate x-angle 1 0 0)
             (gl:rotate y-angle 0 1 0)
             (gl:rotate z-angle 0 0 1)
-            (gl:scale zoom (* -1 zoom) zoom)
+
             ;;            (gl:translate (* -1 (realpart curr-pos)) (* -1 (imagpart curr-pos)) 0)
-            (gl:translate 0 0 (* -1 (/ angle (* 2 pi))))
-            ;;        (gl:translate 0 0 0)
+;;;            (gl:translate 0 0 (* -1 (/ angle (* 2 pi))))
             (when circle-program
               (let ((proj-mat (gl:get-float :modelview-matrix)))
-                (draw-circles proj-mat circle-program circle-vao my-num)
-                (draw-arrows proj-mat arrow-program arrowhead-vao arrowstem-vao my-num)
-                (draw-shape proj-mat shape-program shape-vao curr-path-length)))
+                (draw-circles proj-mat circle-program circle-vao curr-num)
+                (draw-arrows proj-mat arrow-program arrowhead-vao arrowstem-vao curr-num)
+                (draw-shape proj-mat shape-program shape-vao curr-path-length)
+                (draw-grid proj-mat shape-program grid-vao grid-vbo-size)))
             (setf angle (mod (+ angle angle-incr) (* 2 pi)))
             (setf curr-path-idx (mod (1+ curr-path-idx) shape-max-size))
 ;;            (setf *draw?* nil)
@@ -610,9 +624,10 @@
 
 
 (setf (zoom *window*) 2)
-(setf (x-angle *window*) 0)
-(setf (y-angle *window*) 0)
-(setf (z-angle *window*) 0)
+(progn
+(setf (x-angle *window*) 45)
+(setf (y-angle *window*) 45)
+(setf (z-angle *window*) 45))
 
 (progn
 (setf (x-angle *window*) 0)
@@ -620,7 +635,7 @@
 (setf (z-angle *window*) 0)
 )
 
-(setf *angle-incr* 0.01)
+(setf (angle-incr *window*) 0.005)
 (funcall (slot-value *curr-shape* 'freq-idx-transform-fn) 511)
 |#
 

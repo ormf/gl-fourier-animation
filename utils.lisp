@@ -22,6 +22,7 @@
 
 (defconstant +i+ (complex 0 1))
 
+
 (defun complex->vector (cx &key round)
   (if round
       (vector (round (realpart cx))
@@ -49,11 +50,20 @@
     (/ (round (* num ept)) ept 1.0)))
 
 (defun slurp-string (filename)
+  "return content of file specified by filename as string."
   (with-open-file (stream filename)
     (with-output-to-string (str)
       (loop for line = (read-line stream nil)
          while line
-         do (format str "~a~%" line)))))
+            do (format str "~a~%" line)))))
+
+(defun glsl-source (filename)
+  "retrieve content of file located in glsl subdirectory of project
+directory as string."
+  (slurp-string
+   (merge-pathnames
+    (format nil "glsl/~a" filename)
+    (asdf:system-source-directory :gl-fourier-animation))))
 
 (defun make-path (&rest coords)
   (loop for (x y) on coords by #'cddr while y collect (complex x y)))
