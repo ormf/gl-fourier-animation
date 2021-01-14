@@ -145,7 +145,7 @@
                curr-path num shape-max-size)
       window
 
-    (setf curr-path (make-array (list shape-max-size) :initial-element (complex 0 1)))
+    (setf curr-path (make-array (list num) :initial-element (complex 0 1)))
     
     ;; Vertex array objects manage which vertex attributes are
     ;; associated with which data buffers. 
@@ -210,7 +210,7 @@
       (set-vbo-data (:array-buffer :static-draw arrowstem-vbo)
                     (apply #'vector (mapcar (lambda (v) (* v *gl-scale*)) '(0.0 0.002 0.08 0.002 0.08 -0.002 0.0 -0.002))))
       (set-vbo-data (:array-buffer :dynamic-draw shape-vbo)
-                    (loop for i below (* 2 shape-max-size) append (list (float (random 1.0) 1.0) (float (random 1.0) 1.0) 0.0)))
+                    (loop for i below (* 2 num) append (list 0.0 0.0 0.0)))
       (set-vbo-data (:array-buffer :dynamic-draw offset-vbo)
                     (loop for i below num append (list 0.0 0.0 0.0 0.0)))
       (set-vbo-data (:array-buffer :dynamic-draw angle-vbo)
@@ -444,9 +444,15 @@
               (with-bound-buffer (:array-buffer shape-vbo)
                 (gl:with-mapped-buffer (p3 :array-buffer :read-write)
                   (let ((offs (* curr-path-idx 6)))
-                    (setf (cffi:mem-aref p3 :float (+ offs 0)) (float (realpart (or last-pos curr-pos)) 1.0))
-                    (setf (cffi:mem-aref p3 :float (+ offs 1)) (float (imagpart (or last-pos curr-pos)) 1.0))
-                    (setf (cffi:mem-aref p3 :float (+ offs 2)) (float (/ (max 0 (- angle angle-incr)) (* 2 pi)) 1.0))
+                    (setf (cffi:mem-aref p3 :float (+ offs 0))
+                          (if (zerop offs) (cffi:mem-aref p3 :float 0)
+                              (cffi:mem-aref p3 :float (- offs 3))))
+                    (setf (cffi:mem-aref p3 :float (+ offs 1))
+                          (if (zerop offs) (cffi:mem-aref p3 :float 1)
+                              (cffi:mem-aref p3 :float (- offs 2))))
+                    (setf (cffi:mem-aref p3 :float (+ offs 2))
+                          (if (zerop offs) (cffi:mem-aref p3 :float 2)
+                              (cffi:mem-aref p3 :float (- offs 1))))
                     (setf (cffi:mem-aref p3 :float (+ offs 3)) (float (realpart curr-pos) 1.0))
                     (setf (cffi:mem-aref p3 :float (+ offs 4)) (float (imagpart curr-pos) 1.0))
                     (setf (cffi:mem-aref p3 :float (+ offs 5)) (float (/ (max 0 angle) (* 2 pi)) 1.0)))
@@ -483,7 +489,7 @@
                 (draw-shape proj-mat shape-program shape-vao curr-path-length)
                 (draw-grid proj-mat shape-program grid-vao grid-vbo-size)))
             (setf angle (mod (+ angle angle-incr) (* 2 pi)))
-            (setf curr-path-idx (mod (1+ curr-path-idx) shape-max-size))
+            (setf curr-path-idx (floor (* (/ angle (* 2 pi)) num)))
 ;;            (setf *draw?* nil)
             ))))
   (glut:swap-buffers)
