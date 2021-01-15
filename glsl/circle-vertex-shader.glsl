@@ -12,9 +12,8 @@
 // be rotated.
 
 #version 330 core
-
 layout (location = 0) in vec2 aPos; // The vbo of the shape to draw
-layout (location = 1) in vec4 aOffsetLength;  // The offsets from offset buffer
+layout (location = 1) in vec4 aOffsetLength;
 // layout (location = 2) in float aAngle;  // The angle (unused here)
 
 uniform mat4 projection;

@@ -115,7 +115,22 @@
               for y from min-y to max-y by distance
               append (list
                       (float min-x 1.0) (float y 1.0) 0.0
-                      (float max-x 1.0) (float y 1.0) 0.0))))))
+                      (float max-x 1.0) (float y 1.0) 0.0))
+            (loop
+              for z from -3 to 3 by 0.5
+              for l = t then (not l)
+              append (let ((len (if l 0.04 0.02)))
+                       (list
+                        0.0 (* len -1) (float z 1.0)
+                        0.0 len (float z 1.0))))
+            (loop
+              for z from -3 to 3 by 0.5
+              for l = t then (not l)
+              append (let ((len (if l 0.04 0.02)))
+                       (list
+                        (* len -1) 0.0 (float z 1.0)
+                        len 0.0 (float z 1.0))))
+            (list 0.0 0.0 -4 0.0 0.0 4)))))
 
 ;;; (get-grid-verts 10)
 
@@ -489,10 +504,9 @@
             (gl:matrix-mode :modelview)
             (gl:load-identity)
 ;;;            (glu:perspective 50 (/ (glut:width w) (glut:height w)) -10 1)
-;;;            (gl:ortho 0 (glut:width w) 0 (glut:height w) -1 1)
-            (gl:translate 0 0 0)
-            (gl:scale zoom (* -1 zoom) zoom)
-
+            (gl:viewport 0 0 (glut:width w) (glut:width w))
+            (gl:translate 0 -0.5 0)
+            (gl:scale (/ zoom 5) (/ zoom -5) (/ zoom 5))
             (gl:rotate x-angle 1 0 0)
             (gl:rotate y-angle 0 1 0)
             (gl:rotate z-angle 0 0 1)
@@ -505,7 +519,8 @@
 ;;                (translate 0 0 (+ -0.0 (* angle 0.157)))
                 (draw-circles (gl:get-float :modelview-matrix) circle-program circle-vao curr-num)
                 (draw-arrows (gl:get-float :modelview-matrix) arrow-program arrowhead-vao arrowstem-vao curr-num)
-                (translate 0 0 (+ -0.0 (* angle 0.159)))
+                (translate 0 0 (+ -0.0 (* 3 angle 0.159)))
+                (scale 1 1 3)
                 (draw-shape (gl:get-float :modelview-matrix) shape-program shape-vao curr-path-idx (- num curr-path-idx))
                 (if (>= curr-path-length (- num curr-path-idx 1))
                     (progn
@@ -607,12 +622,11 @@
 ;;; (format t "dx: ~,2f dy: ~,2f ~,2f ~,2f ~,6f~%" dx dy (glut:width window) (glut:height window) (/ (min (glut:height window) (glut:width window))));
       )))
 
-
-
 (defmethod glut:keyboard ((w circle-window) key x y)
   (declare (ignore x y))
   (case key
-    (#\Esc (glut:destroy-current-window))))
+    (#\Esc (glut:destroy-current-window))
+    (#\f (setf (follow w) (not (follow w))))))
 
 ;; Cleanup.
 ;; Most of the objects we created have analogous deletion function.
