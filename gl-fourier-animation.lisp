@@ -36,7 +36,7 @@
 (defparameter *path-size* 0)
 (defparameter *curr-path-idx* 1)
 (defparameter *max-path-length* 512)
-(defparameter *curr-shape* *violinschluessel-512*)
+(defparameter *curr-sdl-shape* *violinschluessel-512*)
 
 (defun paint ()
   "paint *path-size* elements of *cyclic-path* as lines, starting at
@@ -52,14 +52,9 @@
         :color (sdl:color :r (round (* opacity 1.0)) :g (round (* opacity 1.0)) :b (round (* opacity 0.0)))
         :aa t)))
 
-(defun set-shape (shape)
-  (setf *path-size* 0)
-  (setf *curr-shape* shape)
-  (setf *angle* 0)
-  nil)
 
-(defun draw-shape ()
-  (with-slots (coords scale offset) *curr-shape*
+(defun sdl-draw-shape ()
+  (with-slots (coords scale offset) *curr-sdl-shape*
     (loop
       for (pt1 pt2) on (scale-rotate coords scale offset :round t)
       with opacity = 50
@@ -83,10 +78,10 @@
   (setf *angle-increment* (/ (* 2 pi freq) *frame-rate*))
   (setf *max-path-length* (min 2048 (round (/ (* 2 pi) *angle-increment*)))))
 
-(defun get-offset (mode)
+(defun sdl-get-offset (mode)
   (case mode
     (1  (complex 0 0))
-    (otherwise (shape-offset *curr-shape*))))
+    (otherwise (shape-offset *curr-sdl-shape*))))
 
 (defun mirror-list (i maxnum)
   (cond ((zerop i) 0)
@@ -106,8 +101,8 @@
         ((oddp i) i)
         (:else (- maxnum i))))
 
-(defun get-idx (i mode)
-  (with-slots (size fft-idx-sorted) *curr-shape*
+(defun sdl-get-idx (i mode)
+  (with-slots (size fft-idx-sorted) *curr-sdl-shape*
     (case mode
       (3 (elt fft-idx-sorted (mirror-list i *max-num*)))
       (2 (elt fft-idx-sorted i))
@@ -127,10 +122,10 @@
               ;; Clear the display each game loop
        (sdl:clear-display sdl:*black*)
        ;; Draw the shape outline
-       (draw-shape)
+       (sdl-draw-shape)
        (paint)
        (let ((offset (get-offset *mode*)))
-         (with-slots (fft scale freq-idx-transform-fn) *curr-shape*
+         (with-slots (fft scale freq-idx-transform-fn) *curr-sdl-shape*
            (dotimes (i *max-num*)
              (let* ((x (get-idx i *mode*))
                     (curr (* (aref fft x) scale
@@ -154,7 +149,8 @@
 (setf *mode* 3)
 (setf *path-size* 0)
 (setf *max-num* 512)
-(set-shape *violinschluessel-512*)
+;;; (set-shape *violinschluessel-512*)
+
 ;; (set-shape *achtel-512*)
 ;; (set-shape *hessen-512*)
 
