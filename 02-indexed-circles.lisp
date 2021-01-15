@@ -71,7 +71,7 @@
    (arrow-program :accessor arrow-program)
    (shape-program :accessor shape-program)
    (last-pos :accessor last-pos :initform nil)
-   (num :accessor num :initform 512)
+   (num :accessor num :initform 1024)
    (angle :accessor angle :initform 0)
    (mode :accessor mode :initform 3)
    (follow :accessor follow :initform nil)
@@ -158,6 +158,8 @@
     (setf curr-path-length 0)))
 
 ;;; (set-shape *window* *achtel-512*)
+;;; (set-shape *window* *hessen-512*)
+;;; (set-shape *window* *violinschluessel-512*)
 ;;; (set-shape *window* *sawtooth-512*)
 
 ;;; (curr-path-length *window*)
@@ -519,8 +521,8 @@
 ;;                (translate 0 0 (+ -0.0 (* angle 0.157)))
                 (draw-circles (gl:get-float :modelview-matrix) circle-program circle-vao curr-num)
                 (draw-arrows (gl:get-float :modelview-matrix) arrow-program arrowhead-vao arrowstem-vao curr-num)
-                (translate 0 0 (+ -0.0 (* 3 angle 0.159)))
-                (scale 1 1 3)
+                (translate 0 0 (+ -0.0 (* 3.14 angle 0.159)))
+                (scale 1 1 3.14)
                 (draw-shape (gl:get-float :modelview-matrix) shape-program shape-vao curr-path-idx (- num curr-path-idx))
                 (if (>= curr-path-length (- num curr-path-idx 1))
                     (progn
@@ -637,9 +639,7 @@
 (defun 02-indexed-circles ()
   (let ((w (make-instance 'circle-window :width 1000 :height 800)))
     (setf *window* w)
-    (setf (shape w) *achtel-512*)
-    (setf (num w) (shape-size (shape w)))
-    (setf (curr-num w) (shape-size (shape w)))
+    (set-shape w *achtel-512*)
     (unwind-protect
          (continuable
            (glut:display-window w))
@@ -687,8 +687,6 @@
 (setf *print* nil)
 
 (set-shape *window* *violinschluessel-512*)
-
-(setf *curr-shape* *violinschluessel-512*)
 
 (set-shape *window* *achtel-512*))
 (set-shape *window* *hessen-512*)
