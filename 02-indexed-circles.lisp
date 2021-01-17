@@ -99,7 +99,11 @@
    (x-angle :accessor x-angle :initform 0)
    (y-angle :accessor y-angle :initform 0)
    (z-angle :accessor z-angle :initform 0)
-   (translation :accessor translation :initform '(0 0 0))
+   (translation :accessor translation :initform '(0 -0.5 0))
+   (view-port :accessor view-port :initform '(0 0 1000 1000))
+   (draw-fn :accessor draw-fn :initform #'draw-time-view)
+   (calc-offs-fn :accessor calc-offs-fn :initform #'gl-set-offset-vectors-time)
+   (zero-z :accessor zero-z :initform t)
    (movement :accessor movement :initform (make-movement))
    (modifiers :accessor modifiers :initform nil)
    (shape :accessor shape :type (or null ) :initform nil)
@@ -147,9 +151,24 @@
 
 (defun get-grid-verts (range distance)
   "get 3D vertices of a coordinate grid plane extending from (0.0 0.0 0.0) to (scale scale 0.0)."
-  (destructuring-bind (min-x min-y max-x max-y) range
+  (destructuring-bind (min-x max-x min-y max-y min-z max-z) range
     (apply #'vector
            (append
+            (list 0.0 0.0 min-z 0.0 0.0 max-z)
+            (loop
+              for z from min-z to max-z by 0.5
+              for l = (< (- z (round z)) 0.01)
+              append (let ((len (if l 0.04 0.02)))
+                       (list
+                        (* len -1) 0.0 (float z 1.0)
+                        len 0.0 (float z 1.0))))
+            (loop
+              for z from min-z to max-z by 0.5
+              for l = t then (not l)
+              append (let ((len (if l 0.04 0.02)))
+                       (list
+                        0.0 (* len -1) (float z 1.0)
+                        0.0 len (float z 1.0))))
             (loop
               for x from min-x to max-x by distance
               append (list
@@ -159,22 +178,7 @@
               for y from min-y to max-y by distance
               append (list
                       (float min-x 1.0) (float y 1.0) 0.0
-                      (float max-x 1.0) (float y 1.0) 0.0))
-            (loop
-              for z from -3 to 3 by 0.5
-              for l = t then (not l)
-              append (let ((len (if l 0.04 0.02)))
-                       (list
-                        0.0 (* len -1) (float z 1.0)
-                        0.0 len (float z 1.0))))
-            (loop
-              for z from -3 to 3 by 0.5
-              for l = t then (not l)
-              append (let ((len (if l 0.04 0.02)))
-                       (list
-                        (* len -1) 0.0 (float z 1.0)
-                        len 0.0 (float z 1.0))))
-            (list 0.0 0.0 -4 0.0 0.0 4)))))
+                      (float max-x 1.0) (float y 1.0) 0.0))))))
 
 ;;; (get-grid-verts 10)
 
@@ -198,8 +202,56 @@
   (with-slots (shape num curr-num angle curr-path-length) window
     (setf shape new-shape)
     (setf curr-num (min curr-num (shape-size (shape window))))
+    (setf num (min curr-num (shape-size (shape window))))
     (setf angle 0)
-    (setf curr-path-length 0)))
+    (setf curr-path-length 0)
+    (clear-shape window)))
+
+(defun set-zero-time-axis (window)
+  (with-bound-buffer (:array-buffer (grid-vbo window))
+    (gl:with-mapped-buffer (p3 :array-buffer :read-write)
+      (loop
+        for idx from 0
+        for coordinate in (append
+                           (list 0.0 0.0 0.0 0.0 0.0 7.0)
+                           (loop
+                             for z from 0 to 7 by 0.5
+                             for l = (< (- z (round z)) 0.01)
+                             append (let ((len (if l 0.04 0.02)))
+                                      (list
+                                       (* len -1) 0.0 (float z 1.0)
+                                       len 0.0 (float z 1.0))))
+                           (loop
+                             for z from 0 to 7 by 0.5
+                             for l = t then (not l)
+                             append (let ((len (if l 0.04 0.02)))
+                                      (list
+                                       0.0 (* len -1) (float z 1.0)
+                                       0.0 len (float z 1.0)))))
+        do (setf (cffi:mem-aref p3 :float idx) (float coordinate 1.0))))))
+
+(defun set-freq-axis (window)
+  (with-bound-buffer (:array-buffer (grid-vbo window))
+    (gl:with-mapped-buffer (p3 :array-buffer :read-write)
+      (loop
+        for idx from 0
+        for coordinate in (append
+                           (list 0.0 0.0 -3.5 0.0 0.0 3.5)
+                           (loop
+                             for z from -3.5 to 3.5 by 0.5
+                             for l = (< (- z (round z)) 0.01)
+                             append (let ((len (if l 0.04 0.02)))
+                                      (list
+                                       (* len -1) 0.0 (float z 1.0)
+                                       len 0.0 (float z 1.0))))
+                                                      (loop
+                             for z from -3.5 to 3.5 by 0.5
+                             for l = t then (not l)
+                             append (let ((len (if l 0.04 0.02)))
+                                      (list
+                                       0.0 (* len -1) (float z 1.0)
+                                       0.0 len (float z 1.0)))))
+        do (setf (cffi:mem-aref p3 :float idx) (float coordinate 1.0))))))
 
 ;;; (set-shape *window* *achtel-512*)
 ;;; (set-shape *window* *hessen-512*)
@@ -210,6 +262,7 @@
 
 ;;; (set-shape *window* *hessen-512*)
 
+#|
 (defun set-offset-data (w)
   (with-slots (offset-vbo num) w
     (set-vbo-data (:array-buffer :dynamic-draw offset-vbo)
@@ -217,6 +270,7 @@
                                                      (- (* 0.2 (mod (floor i 10) 10)) 0.9)
                                                      (+ 0.1 (random 0.7))
                                                      0.0)))))
+|#
 
 (defmethod glut:display-window :before ((window circle-window))
   ;; An array buffer can be used to store verex position, colors,
@@ -289,7 +343,7 @@
         (setf shape-vbo (elt buffers 4))
         (setf offset-vbo (elt buffers 5))
         (setf angle-vbo (elt buffers 6)))
-      (let ((verts (get-grid-verts '(-5 -5 5 5) (* *gl-scale* 0.1))))
+      (let ((verts (get-grid-verts '(-5 5 -5 5 -3.5 3.5) (* *gl-scale* 0.1))))
         (set-vbo-data (:array-buffer :static-draw grid-vbo) verts)
         (setf  grid-vbo-size (/ (length verts) 6)))
       (set-vbo-data (:array-buffer :static-draw circle-vbo)
@@ -457,7 +511,7 @@
 
 (defun clear-shape (window)
   (with-slots (curr-path-length curr-path-idx angle num draw-once-p) window
-    (setf curr-path-idx (- num 1))
+    (setf curr-path-idx num)
     (setf angle 0)
     (setf curr-path-length 0)
     (setf draw-once-p t)))
@@ -481,127 +535,237 @@
                             curr-step numsteps))))
       (if (= (incf curr-step) numsteps) (setf active nil)))))
 
+(defun gl-set-offset-vectors-zero (window)
+  (let ((result 0))
+    (with-slots (offset-vbo angle curr-num shape display-mode) window
+      (with-slots (freq-idx-transform-fn fft) shape
+        (with-bound-buffer (:array-buffer offset-vbo)
+          (gl:with-mapped-buffer (p1 :array-buffer :read-write)
+            (loop
+              for curr-offset = (complex 0.0 0.0) then next-offset
+              for i below curr-num
+              for n from 0
+              for x = (get-idx i display-mode shape)
+              for idx = (funcall freq-idx-transform-fn x)
+              for next-offset = (* *gl-scale* (exp (* +i+ idx angle))  (aref fft x))
+                then (+ next-offset (* *gl-scale* (exp (* +i+ idx angle)) (aref fft x)))
+              do (let ((offs (* i 4)))
+                   (setf (cffi:mem-aref p1 :float (+ offs 0))
+                         (float (realpart curr-offset) 1.0))
+                   (setf (cffi:mem-aref p1 :float (+ offs 1))
+                         (float (imagpart curr-offset) 1.0))
+                   0.01
+                   (setf (cffi:mem-aref p1 :float (+ offs 3))
+                         (float (* 10 (abs (aref fft x))) 1.0)))
+              finally (setf result next-offset))))))
+    (values result)))
+
+(defun gl-set-offset-vectors-time (window)
+  (let ((result 0))
+    (with-slots (offset-vbo angle curr-num shape display-mode) window
+      (with-slots (freq-idx-transform-fn fft) shape
+        (with-bound-buffer (:array-buffer offset-vbo)
+          (gl:with-mapped-buffer (p1 :array-buffer :read-write)
+            (loop
+              for curr-offset = (complex 0.0 0.0) then next-offset
+              for i below curr-num
+              for n from 0
+              for x = (get-idx i display-mode shape)
+              for idx = (funcall freq-idx-transform-fn x)
+              for next-offset = (* *gl-scale* (exp (* +i+ idx angle))  (aref fft x))
+                then (+ next-offset (* *gl-scale* (exp (* +i+ idx angle)) (aref fft x)))
+              do (let ((offs (* i 4)))
+                   (setf (cffi:mem-aref p1 :float (+ offs 0))
+                         (float (realpart curr-offset) 1.0))
+                   (setf (cffi:mem-aref p1 :float (+ offs 1))
+                         (float (imagpart curr-offset) 1.0))
+                   (setf (cffi:mem-aref p1 :float (+ offs 2))
+                         (float angle 1.0))
+                   (setf (cffi:mem-aref p1 :float (+ offs 3))
+                         (float (* 10 (abs (aref fft x))) 1.0)))
+              finally (setf result next-offset))))))
+    (values result)))
+
+(defun gl-set-offset-vectors-spectrum (window)
+  (let ((result 0))
+    (with-slots (offset-vbo angle curr-num shape display-mode num) window
+      (with-slots (freq-idx-transform-fn fft) shape
+        (with-bound-buffer (:array-buffer offset-vbo)
+          (gl:with-mapped-buffer (p1 :array-buffer :read-write)
+            (loop
+              for curr-offset = (complex 0.0 0.0) then next-offset
+              for i below curr-num
+              for n from 0
+              for x = (get-idx i display-mode shape)
+              for idx = (funcall freq-idx-transform-fn x)
+              for next-offset = (* *gl-scale* (exp (* +i+ idx angle))  (aref fft x))
+                then (+ next-offset (* *gl-scale* (exp (* +i+ idx angle)) (aref fft x)))
+              do (let ((offs (* i 4)))
+                   (setf (cffi:mem-aref p1 :float (+ offs 0))
+                         0.0)
+                   (setf (cffi:mem-aref p1 :float (+ offs 1))
+                         0.0)
+                   (setf (cffi:mem-aref p1 :float (+ offs 2))
+                         (if (< x (/ num 2))
+                             (float (* (/ x num) (* 2 pi)) 1.0)
+                             (float (- (* (/ x num) (* 2 pi)) (* 2 pi)) 1.0)))
+                   (setf (cffi:mem-aref p1 :float (+ offs 3))
+                         (float (* 10 (abs (aref fft x))) 1.0)))
+              finally (setf result next-offset))))))
+    (values result)))
+
 (defmethod glut:display ((w circle-window))
   (update-swank)
-  (if (or (draw-p w) (draw-once-p w))
-      (let (curr-pos)
-        ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
-        (with-slots (angle
-                     circle-program circle-vao
-                     arrow-program arrowhead-vao arrowstem-vao
-                     shape-program shape-vao grid-vao grid-vbo-size
-                     offset-vbo angle-vbo shape-vbo
-                     shape num curr-num zoom
-                     curr-path curr-path-idx
-                     curr-path-length
-                     x-angle y-angle z-angle
-                     translation movement
-                     last-pos angle-incr
-                     display-mode follow) 
-            w
-          (continuable
-            (gl-init)
-            (gl:bind-buffer :array-buffer offset-vbo)
-            (with-slots (freq-idx-transform-fn scale fft) shape
-              (with-bound-buffer (:array-buffer offset-vbo)
-                (gl:with-mapped-buffer (p1 :array-buffer :read-write)
-                  (loop
-                    for curr-offset = (complex 0.0 0.0) then next-offset
-                    for i below curr-num
-                    for n from 0
-                    for x = (get-idx i display-mode shape)
-                    for idx = (funcall freq-idx-transform-fn x)
-                    for next-offset = (* *gl-scale* (exp (* +i+ idx angle))  (aref fft x))
-                      then (+ next-offset (* *gl-scale* (exp (* +i+ idx angle)) (aref fft x)))
-                    do
-                       (let ((offs (* i 4)))
-                         (setf (cffi:mem-aref p1 :float (+ offs 0))
-                               (float (realpart curr-offset) 1.0))
-                         (setf (cffi:mem-aref p1 :float (+ offs 1))
-                               (float (imagpart curr-offset) 1.0))
-                         ;; (setf (cffi:mem-aref p1 :float (+ offs 2)) (float (/ (max 0 angle) (* 2 pi)) 1.0))
-                         0.01
-                         (setf (cffi:mem-aref p1 :float (+ offs 3))
-                               (float (* 10 (abs (aref fft x))) 1.0))
-                         (if *print* (format t "~&~a: ~a ~a ~a ~a"
-                                             i
-                                             (cffi:mem-aref p1 :float (+ offs 0))
-                                             (cffi:mem-aref p1 :float (+ offs 1))
-                                             (cffi:mem-aref p1 :float (+ offs 2))
-                                             (cffi:mem-aref p1 :float (+ offs 3))))
-                         )
-                    finally (progn
-                              (setf curr-pos next-offset)
-                              (setf (aref curr-path curr-path-idx) next-offset)
-                              (setf curr-path-length (max curr-path-length (- num curr-path-idx)))))))
-              (with-bound-buffer (:array-buffer angle-vbo)
-                (gl:with-mapped-buffer (p2 :array-buffer :read-write)
-                  (loop
-                    for i below curr-num
-                    for x = (get-idx i display-mode shape)
-                    for idx = (funcall freq-idx-transform-fn x)
-                    do
-                       (setf (cffi:mem-aref p2 :float i) (float (+ (phase (aref fft x)) (* angle idx)) 1.0))
-                       ;;                 (setf (cffi:mem-aref p2 :float i) (float (elt point 3) 1.0))
-                       (if *print* (format t " ~a~%"
-                                           (cffi:mem-aref p2 :float i))))))
-              (with-bound-buffer (:array-buffer shape-vbo)
-                (gl:with-mapped-buffer (p3 :array-buffer :read-write)
-                  (let ((offs (* curr-path-idx 6))
-                        (next-offs (* (mod (1+ curr-path-idx) num) 6)))
-                    (setf (cffi:mem-aref p3 :float (+ offs 0)) (float (realpart curr-pos) 1.0))
-                    (setf (cffi:mem-aref p3 :float (+ offs 1)) (float (imagpart curr-pos) 1.0))
-                    (setf (cffi:mem-aref p3 :float (+ offs 2)) (float (/ (max 0 angle) (* -2 pi)) 1.0))
-                    (setf (cffi:mem-aref p3 :float (+ offs 3))
-                          (cffi:mem-aref p3 :float (+ next-offs 0)))
-                    (setf (cffi:mem-aref p3 :float (+ offs 4))
-                          (cffi:mem-aref p3 :float (+ next-offs 1)))
-                    (setf (cffi:mem-aref p3 :float (+ offs 5))
-                          (if (= curr-path-idx (- num 1))
-                              0.0
-                              (float (cffi:mem-aref p3 :float (+ next-offs 2))))
-                          )))))
-            (setf last-pos curr-pos)
-            (gl:matrix-mode :modelview)
-            (gl:load-identity)
+  (let ((curr-pos))
+    ;; (gl:clear :color-buffer-bit :depth-buffer-bit)
+    (with-slots (angle
+                 circle-program circle-vao
+                 arrow-program arrowhead-vao arrowstem-vao
+                 shape-program shape-vao grid-vao grid-vbo-size
+                 offset-vbo angle-vbo shape-vbo
+                 shape num curr-num zoom
+                 curr-path curr-path-idx
+                 curr-path-length
+                 x-angle y-angle z-angle
+                 translation movement
+                 last-pos angle-incr
+                 display-mode follow
+                 view-port draw-fn calc-offs-fn) 
+        w
+      (continuable
+        (gl-init)
+        (if (or (draw-p w) (draw-once-p w))
+            (progn
+              (gl:bind-buffer :array-buffer offset-vbo)
+              (with-slots (freq-idx-transform-fn scale fft) shape
+                (let  ((tmp curr-path-idx))
+                  (setf curr-pos (funcall calc-offs-fn w))
+                  (setf curr-path-idx (- num (floor (* (/ angle (* 2 pi)) num)) 1))
+                  (if (< curr-path-idx tmp)
+                      (loop
+                        for idx from curr-path-idx to tmp
+                        do (setf (aref curr-path curr-path-idx) curr-pos))
+                      (setf (aref curr-path curr-path-idx) curr-pos))
+                  (setf curr-path-length (max curr-path-length (- num curr-path-idx)))
+;;;                (format t "~a, ~a ~a; " curr-path-length tmp curr-path-idx)
+                  (if (> tmp curr-path-idx)
+                      (with-bound-buffer (:array-buffer shape-vbo)
+                        (gl:with-mapped-buffer (p3 :array-buffer :read-write)
+                          (if (<= curr-path-length 1)
+                              (let ((offs (* (1- num) 6)))
+                                (setf (cffi:mem-aref p3 :float (+ offs 0)) (float (realpart curr-pos) 1.0))
+                                (setf (cffi:mem-aref p3 :float (+ offs 1)) (float (imagpart curr-pos) 1.0))
+                                (setf (cffi:mem-aref p3 :float (+ offs 2)) (float (/ (max 0 angle) (* -2 pi)) 1.0))
+                                (setf (cffi:mem-aref p3 :float (+ offs 3)) (float (realpart curr-pos) 1.0))
+                                (setf (cffi:mem-aref p3 :float (+ offs 4)) (float (imagpart curr-pos) 1.0))
+                                (setf (cffi:mem-aref p3 :float (+ offs 5)) (float (/ (max 0 angle) (* -2 pi)) 1.0)))
+                              (loop
+                                for idx from curr-path-idx below tmp
+                                do (let ((offs (* idx 6))
+                                         (next-offs (* (mod (1+ idx) num) 6)))
+                                     (setf (cffi:mem-aref p3 :float (+ offs 0)) (float (realpart curr-pos) 1.0))
+                                     (setf (cffi:mem-aref p3 :float (+ offs 1)) (float (imagpart curr-pos) 1.0))
+                                     (setf (cffi:mem-aref p3 :float (+ offs 2)) (float (/ (max 0 angle) (* -2 pi)) 1.0))
+                                     (setf (cffi:mem-aref p3 :float (+ offs 3))
+                                           (cffi:mem-aref p3 :float (+ next-offs 0)))
+                                     (setf (cffi:mem-aref p3 :float (+ offs 4))
+                                           (cffi:mem-aref p3 :float (+ next-offs 1)))
+                                     (setf (cffi:mem-aref p3 :float (+ offs 5))
+                                           (float (cffi:mem-aref p3 :float (+ next-offs 2)))
+                                           )))))))
+                  (with-bound-buffer (:array-buffer angle-vbo)
+                    (gl:with-mapped-buffer (p2 :array-buffer :read-write)
+                      (loop
+                        for i below curr-num
+                        for x = (get-idx i display-mode shape)
+                        for idx = (funcall freq-idx-transform-fn x)
+                        do
+                           (setf (cffi:mem-aref p2 :float i) (float (+ (phase (aref fft x)) (* angle idx)) 1.0))
+                           ;;                 (setf (cffi:mem-aref p2 :float i) (float (elt point 3) 1.0))
+                           (if *print* (format t " ~a~%"
+                                               (cffi:mem-aref p2 :float i))))))))
+              (setf angle (mod (+ angle angle-incr) (* 2 pi)))
+              (setf last-pos curr-pos)))
+        (gl:matrix-mode :modelview)
+        (gl:load-identity)
 ;;;            (glu:perspective 50 (/ (glut:width w) (glut:height w)) -10 1)
-            (gl:viewport 0 0 (glut:width w) (glut:width w))
-            (gl:translate 0 -0.5 0)
-            (if (movement-active movement)
-                (adjust-camera w))
-            (gl:scale (/ zoom 5) (/ zoom -5) (/ zoom 5))
-            (gl:rotate x-angle 1 0 0)
-            (gl:rotate y-angle 0 1 0)
-            (gl:rotate z-angle 0 0 1)
-            (apply #'gl:translate translation)
+        (apply #'gl:viewport view-port)
+        (apply #'gl:translate '(0 -0.7 0))
+        (if (movement-active movement)
+            (adjust-camera w))
+        (gl:scale (/ zoom 5) (/ zoom -5) (/ zoom 5))
+        (gl:rotate x-angle 1 0 0)
+        (gl:rotate y-angle 0 1 0)
+        (gl:rotate z-angle 0 0 1)
+        (apply #'gl:translate translation)
 
-            (if follow
-                (gl:translate (* -1 (realpart curr-pos)) (* -1 (imagpart curr-pos)) 0))
+        (if follow
+            (gl:translate (* -1 (realpart curr-pos)) (* -1 (imagpart curr-pos)) (* -1 angle)))
 ;;;            (gl:translate 0 0 (* -1 (/ angle (* 2 pi))))
-            (when circle-program
-              (let ((proj-mat (gl:get-float :modelview-matrix)))
-                (draw-grid proj-mat shape-program grid-vao grid-vbo-size)
-                (draw-circles (gl:get-float :modelview-matrix) circle-program circle-vao curr-num)
-                (draw-arrows (gl:get-float :modelview-matrix) arrow-program arrowhead-vao arrowstem-vao curr-num)
-                (translate 0 0 (+ -0.0 (* 3.14 angle 0.159)))
-                (scale 1 1 3.14)
-                (draw-shape (gl:get-float :modelview-matrix) shape-program shape-vao curr-path-idx (- num curr-path-idx))
-                (if (>= curr-path-length num)
-                    (progn
-                      (translate 0 0 1 )
-                      (draw-shape (gl:get-float :modelview-matrix) shape-program shape-vao 0 curr-path-idx)))))
-            (setf angle (mod (+ angle angle-incr) (* 2 pi)))
-            (setf curr-path-idx (- num (floor (* (/ angle (* 2 pi)) num)) 1))
-            (setf (draw-once-p w) nil)
-;;            (setf *draw?* nil)
-            ))))
+        (when circle-program
+          (funcall draw-fn w))
+        (setf (draw-once-p w) nil))))
   (glut:swap-buffers)
   (gl:finish))
 
+(progn
+  (defun draw-time-view (window)
+    (with-slots (shape-program grid-vao shape-vao
+                 curr-path-idx curr-path-length
+                 circle-program circle-vao
+                 arrow-program arrowhead-vao arrowstem-vao
+                 grid-vbo-size angle curr-num num)
+        window
+      (let ((proj-mat (gl:get-float :modelview-matrix)))
+        (draw-grid proj-mat shape-program grid-vao grid-vbo-size)
+        (draw-circles (gl:get-float :modelview-matrix) circle-program circle-vao curr-num)
+        (draw-arrows (gl:get-float :modelview-matrix) arrow-program arrowhead-vao arrowstem-vao curr-num)
+        (translate 0 0 0)
+        (scale 1 1 -6.28)
+        (draw-shape (gl:get-float :modelview-matrix) shape-program shape-vao (if (< curr-path-length num) curr-path-idx 0) curr-path-length))))
+
+  ;; (setf (draw-fn *window*) #'draw-time-view)
+  )
+
+(defun draw-time-view-zero (window)
+  (with-slots (shape-program grid-vao shape-vao
+               curr-path-idx curr-path-length
+               circle-program circle-vao
+               arrow-program arrowhead-vao arrowstem-vao
+               grid-vbo-size angle curr-num num)
+      window
+    (let ((proj-mat (gl:get-float :modelview-matrix)))
+      (draw-grid proj-mat shape-program grid-vao grid-vbo-size)
+      (draw-circles (gl:get-float :modelview-matrix) circle-program circle-vao curr-num)
+      (draw-arrows (gl:get-float :modelview-matrix) arrow-program arrowhead-vao arrowstem-vao curr-num)
+      (translate 0 0 (+ -0.0 (* 6.28 angle 0.159)))
+      (scale 1 1 6.28)
+      (draw-shape (gl:get-float :modelview-matrix) shape-program shape-vao curr-path-idx (- num curr-path-idx))
+      (if (>= curr-path-length num)
+          (progn
+            (translate 0 0 1 )
+            (draw-shape (gl:get-float :modelview-matrix) shape-program shape-vao 0 curr-path-idx))))))
+
+(defun draw-spectrum-view (window)
+    (with-slots (shape-program grid-vao shape-vao
+                 curr-path-idx curr-path-length
+                 circle-program circle-vao
+                 arrow-program arrowhead-vao arrowstem-vao
+                 grid-vbo-size angle curr-num num)
+        window
+      (let ((proj-mat (gl:get-float :modelview-matrix)))
+        (draw-grid proj-mat shape-program grid-vao grid-vbo-size)
+;;        (draw-circles (gl:get-float :modelview-matrix) circle-program circle-vao curr-num)
+        (draw-arrows (gl:get-float :modelview-matrix) arrow-program arrowhead-vao arrowstem-vao curr-num)
+        (translate 0 0 0)
+        (scale 1 1 -6.28)
+        (draw-shape (gl:get-float :modelview-matrix) shape-program shape-vao (if (< curr-path-length num) curr-path-idx 0) curr-path-length))))
 
 (defmethod glut:reshape ((w circle-window) width height)
-  (with-slots (circle-program arrow-program shape-program) w
-    (gl:viewport 0 0 (min width height) (min width height))
+  (with-slots (circle-program arrow-program shape-program view-port translation) w
+    (setf view-port (list (* -0.0 (max width height)) (* 0 (max width height)) (* 1 (max width height)) (* 1 (max width height))))
+    (setf translation (list 0 0 0))
+    (apply #'gl:viewport view-port)
     (gl:matrix-mode :modelview)
     ;; Ensure that projection matrix ratio always matches the window size ratio,
     ;; so the polygon will always look square.
@@ -609,23 +773,9 @@
 ;;; (glu:perspective 50 (/ (glut:width window) (glut:height window)) -1 1)
 ;;; (gl:ortho 0 width 0 height -1 1)
 ;;; (gl:translate (* (- 1 gl-scale) gl-width) (* (- 1 gl-scale) gl-height) 0.0)
-    (gl:scale 1 1 1)
-    (gl:ortho -1 1 -1 1 -1 1)
-    (when circle-program
-      (with-program (circle-program)
-        (gl:uniform-matrix 
-         (gl:get-uniform-location circle-program "projection") 
-         4 (vector (gl:get-float :modelview-matrix)) nil)))
-    (when arrow-program
-      (with-program (arrow-program)
-        (gl:uniform-matrix 
-         (gl:get-uniform-location arrow-program "projection") 
-         4 (vector (gl:get-float :modelview-matrix)) nil)))
-    (when shape-program
-      (with-program (shape-program)
-        (gl:uniform-matrix 
-         (gl:get-uniform-location shape-program "projection") 
-         4 (vector (gl:get-float :modelview-matrix)) nil)))
+;;;    (gl:scale 1 1 1)
+;;;    (gl:ortho -1 1 -1 1 -1 1)
+
     (gl:matrix-mode :modelview)
     (gl:load-identity)
     (setf (glut:width w) width)
@@ -646,10 +796,10 @@
            (let ()
              (setf (mouse-start-x window) x)
              (setf (mouse-start-y window) y)
+;;;             (format t "~a, ~a, ~a~%" (x-angle window) (y-angle window) (z-angle window))
              (setf (mouse-start-x-angle window) (x-angle window))
              (setf (mouse-start-y-angle window) (y-angle window))
-             (setf (mouse-start-z-angle window) (z-angle window))
-             (format t "~a, ~a, ~a~%" (x-angle window) (y-angle window) (z-angle window)))))
+             (setf (mouse-start-z-angle window) (z-angle window)))))
         (:wheel-down (if (eql state :down)
                          (cond
                            ((equal (list :active-ctrl) modifiers)
@@ -688,14 +838,13 @@
       (let* ((scale (/ 180 (min (glut:height window) (glut:width window))))
              (dx (float (* (- x (mouse-start-x window)) scale)))
              (dy (float (* (- (mouse-start-y window) y) scale))))
-        (format t "~a ~a ~a ~a, ~a~%" x (mouse-start-x window) dx dy modifiers)
+;;        (format t "~a ~a ~a ~a, ~a~%" x (mouse-start-x window) dx dy modifiers)
         (if (equal (list :active-shift) modifiers)
             (progn
 ;;              (setf (y-angle window) (+ (mouse-start-y-angle window) dx))
               (setf (y-angle window) (+ (mouse-start-y-angle window) dx)))
             (setf (y-angle window) (+ (mouse-start-y-angle window) dx)))
-        (setf (x-angle window) (+ (mouse-start-x-angle window) dy))
-        ))))
+        (setf (x-angle window) (+ (mouse-start-x-angle window) dy))))))
 
 (defmethod glut:keyboard ((w circle-window) key x y)
   (declare (ignore x y))
@@ -703,6 +852,11 @@
     (#\Esc (glut:destroy-current-window))
     (#\f (setf (follow w) (not (follow w))))
     (#\c (clear-shape w))
+    (#\u (setf (draw-once-p w) t))
+    (#\a (progn (setf (zero-z w) (not (zero-z w)))
+                (if (zero-z w)
+                    (set-zero-time-axis w)
+                    (set-freq-axis w))))
     (#\SPACE (toggle-draw w))))
 
 ;; Cleanup.
@@ -725,43 +879,23 @@
 ;;; (02-indexed-circles)
 ;;; (gl:named-buffer-storage)
 
-(make-movement
- :target-x-angle 0
- :target-y-angle 90
- :target-z-angle 0
- :active t)
-
-
-
-(setf (movement *window*)
-      (make-movement
-       :target-x-angle 90
-       :target-y-angle 90
-       :target-z-angle 0
-       :active t))
-
-(defparameter *points*
-  `((0 0 0)
-    (1 1 0)))
-
-(defparameter *testvalues*
-  `((0.0 0.0 1.1 0.0)
-    (0.0 0.0 1.3 ,(/ pi 2))
-    (0.0 0 2.0 1.5)))
-
-(defparameter *draw?* nil)
-
-
 ;; (setf (curr-num *window*) 30)
-
-(setf *draw?* t)
 
 #|
 (progn
-  (setf *draw?* nil)
   (subseq (curr-path *window*) 0 (curr-path-length *window*)))
 
+(progn
+(set-shape *window* *violinschluessel-512*)
+(setf (calc-offs-fn *window*) #'gl-set-offset-vectors-time)
+(setf (draw-fn *window*) #'draw-time-view))
 
+
+(progn
+(set-shape *window* *sawtooth-8*)
+(setf (calc-offs-fn *window*) #'gl-set-offset-vectors-spectrum)
+(setf (draw-fn *window*) #'draw-spectrum-view))
+(curr-path-length *window*)
 (curr-path-idx *window*)
 
 (curr-path-length *window*)
@@ -770,18 +904,21 @@
 (progn
 (02-indexed-circles)
 
-(setf (curr-num *window*) 30))
+(setf (curr-num *window*) 8))
 
 (setf (angle *window*) 0)
 (setf (angle-incr *window*) 0.005)
 (setf *print* t)
 (setf *print* nil)
 
+(num *window*)
+
 (set-shape *window* *violinschluessel-512*)
 
 (set-shape *window* *achtel-512*)
 (set-shape *window* *hessen-512*)
 (set-shape *window* *sawtooth-512*)
+(set-shape *window* *sawtooth-8*)
 
 (setf (display-mode *window*) 2)
 (setf (display-mode *window*) 3)
@@ -799,6 +936,7 @@
 (setf (y-angle *window*) 90)
 (setf (z-angle *window*) 0)
 )
+Florian: 
 
 (progn
 (setf (x-angle *window*) 0)
@@ -807,12 +945,13 @@
 )
 
 (setf (angle-incr *window*) 0.005)
-(funcall (slot-value *curr-shape* 'freq-idx-transform-fn) 511)
 
 (setf (curr-num *window*) 1)
 (setf (curr-num *window*) 2)
 (setf (curr-num *window*) 4)
-(setf (curr-num *window*) 10)
+(setf (curr-num *window*) 6)
+(setf (curr-num *window*) 8)
+(setf (curr-num *window*) 16)
 (setf (curr-num *window*) 40)
 (setf (curr-num *window*) 80)
 (setf (curr-num *window*) 160)

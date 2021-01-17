@@ -84,15 +84,74 @@ number of points on the path needs to be a power of two."
      :scale scale
      :fft-idx-sorted (apply #'vector
                             (append
-                             (loop for x from 1 to 511 collect (if (oddp x) (/ (1+ x) 2)
-                                                                   (- 512 (/ x 2))))
+                             (loop for x from 1 below size collect (if (oddp x) (/ (1+ x) 2)
+                                                                   (- size (/ x 2))))
                              '(0)))
 
      
      :freq-idx-transform-fn (get-transform-fn size)
      :coords nil
-     :fft (apply #'vector (loop for x below 512 collect (complex 0 (* scale (float (cond
-                                                                                     ((zerop x) 0.0)
-                                                                                     ((< x 256) (/ x))
-                                                                                     (t (/ (- x 512))))
+     :fft (apply #'vector (loop for x below size collect (complex 0 (* scale (float (cond
+                                                                                      ((= x (1- size)) 0.0)
+                                                                                      ((zerop x) 0.0)
+                                                                                      ((< x (/ size 2)) (/ x))
+                                                                                      (t (/ (- x size))))
                                                                                    1.0))))))))
+
+(defparameter *sawtooth-512*
+  (let ((size 512) (scale (/ 15.0)))
+    (make-shape
+     :size size
+     :offset (complex 2100 -750)
+     :scale scale
+     :fft-idx-sorted (apply #'vector
+                            (append
+                             (loop for x from 1 below size collect (if (oddp x)
+                                                                 (/ (1+ x) 2)
+                                                                 (mod (- size (/ x 2)) size)))
+                             '(0)))
+
+     
+     :freq-idx-transform-fn (get-transform-fn size)
+     :coords nil
+     :fft (apply #'vector
+                 (loop
+                   for x below size
+                   collect (complex 0 (* scale
+                                         (float
+                                          (cond
+                                            ((or (zerop x) (= x (/ size 2))) 0.0)
+                                            ((< x (/ size 2)) (/ x))
+                                            (t (/ (- x size))))
+                                          1.0))))))))
+
+(defparameter *sawtooth-8*
+  (let ((size 8) (scale (/ 15.0)))
+    (make-shape
+     :size size
+     :offset (complex 2100 -750)
+     :scale scale
+     :fft-idx-sorted (apply #'vector
+                            (append
+                             (loop for x from 1 below size collect (if (oddp x)
+                                                                 (/ (1+ x) 2)
+                                                                 (mod (- size (/ x 2)) size)))
+                             '(0)))
+
+     
+     :freq-idx-transform-fn (get-transform-fn size)
+     :coords nil
+     :fft (apply #'vector
+                 (loop
+                   for x below size
+                   collect (complex 0 (* scale
+                                         (float
+                                          (cond
+                                            ((or (zerop x) (= x (/ size 2))) 0.0)
+                                            ((< x (/ size 2)) (/ x))
+                                            (t (/ (- x size))))
+                                          1.0))))))))
+
+(shape-fft *sawtooth-512*)
+
+
