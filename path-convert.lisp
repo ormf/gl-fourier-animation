@@ -186,7 +186,7 @@ spacing of returned points."
       if (> curr-length target-length)
         collect (progn
                   (incf target-length length-inc)
-                  pt))))
+                  (list (first pt) (* -1 (second pt)))))))
 
 (defun normalize-coords (coords)
   (let* ((vals (apply #'append coords))
