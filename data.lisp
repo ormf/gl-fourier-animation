@@ -103,6 +103,102 @@ number of points on the path needs to be a power of two."
                                             (t (/ (- x size))))
                                           1.0))))))))
 
+(defparameter *cos-pulse-512*
+  (let ((size 512) (scale 0.5))
+    (make-shape
+     :fft-size size
+     :offset (complex 2100 -750)
+     :scale scale
+     :fft-idx-sorted (apply #'vector
+                            (append
+                             (loop for x below size collect x)))
+
+     
+     :freq-idx-transform-fn (get-transform-fn size)
+     :coords nil
+     :fft (apply #'vector
+                 (loop
+                   for x below size
+                   collect (complex (* scale 0.5) 0))))))
+
+(defparameter *cos-pulse-512-norm*
+  (let ((size 512) (scale 0.5))
+    (make-shape
+     :fft-size size
+     :offset (complex 2100 -750)
+     :scale scale
+     :fft-idx-sorted (apply #'vector
+                            (append
+                             (loop for x below size collect x)))
+
+     
+     :freq-idx-transform-fn (get-transform-fn size)
+     :coords nil
+     :fft (apply #'vector
+                 (loop
+                   for x below size
+                   collect (complex (* scale 1) 0))))))
+
+(defparameter *cos-pulse-8*
+  (let ((size 8) (scale 0.5))
+    (make-shape
+     :fft-size size
+     :offset (complex 2100 -750)
+     :scale scale
+     :fft-idx-sorted (apply #'vector
+                            (append
+                             (loop for x below size collect x)))
+
+     
+     :freq-idx-transform-fn (get-transform-fn size)
+     :coords nil
+     :fft (apply #'vector
+                 (loop
+                   for x below size
+                   collect (complex (* scale 0.5) 0))))))
+
+(defparameter *sin-pulse-8*
+  (let ((size 8) (scale 0.5))
+    (make-shape
+     :fft-size size
+     :offset (complex 2100 -750)
+     :scale scale
+     :fft-idx-sorted (apply #'vector
+                            (append
+                             (loop for x below size collect x)))
+
+     
+     :freq-idx-transform-fn (get-transform-fn size)
+     :coords nil
+     :fft (apply #'vector
+                 (loop
+                   for x below size
+                   collect (complex 0 (if (< x (/ size 2))
+                                          (* scale -0.5)
+                                          (* scale 0.5))))))))
+
+(defparameter *sin-pulse-512*
+  (let ((size 512) (scale 0.5))
+    (make-shape
+     :fft-size size
+     :offset (complex 2100 -750)
+     :scale scale
+     :fft-idx-sorted (apply #'vector
+                            (append
+                             (loop for x below size collect x)))
+
+     
+     :freq-idx-transform-fn (get-transform-fn size)
+     :coords nil
+     :fft (apply #'vector
+                 (loop
+                   for x below size
+                   collect (complex 0 (if (< x (/ size 2))
+                                          (* scale -0.5)
+                                          (* scale 0.5))))))))
+
+
+
 (defparameter *sawtooth-8*
   (let ((size 8) (scale 0.45))
     (make-shape
@@ -129,7 +225,4 @@ number of points on the path needs to be a power of two."
                                             ((< x (/ size 2)) (/ x))
                                             (t (/ (- x size))))
                                           1.0))))))))
-
-(shape-fft *sawtooth-512*)
-
 
