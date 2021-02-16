@@ -576,8 +576,8 @@
   (with-program (arrow-program)
     (gl:uniform-matrix
      (gl:get-uniform-location arrow-program "projection") 4 (vector proj-mat) nil)
-    (gl:bind-vertex-array arrowhead-vao)
-    (gl:draw-arrays-instanced :triangles 0 3 num)
+    (with-bound-vertex-array (arrowhead-vao)
+      (gl:draw-arrays-instanced :triangles 0 3 num))
     (with-bound-vertex-array (arrowstem-vao)
       (gl:draw-arrays-instanced :quads 0 4 num))))
 
@@ -783,17 +783,18 @@
                                (setf (cffi:mem-aref p3 :float (+ offs 4)) (float (imagpart curr-pos) 1.0))
                                (setf (cffi:mem-aref p3 :float (+ offs 5)) (float (/ (max 0 angle) (* 2 pi)) 1.0))))))
                      (when (or continuous-p (/= tmp curr-path-idx))
-                         (with-bound-buffer (:array-buffer angle-vbo)
-                           (gl:with-mapped-buffer (p2 :array-buffer :read-write)
-                             (loop
-                               for i from 0
-                               for x in curr-fft-idxs
-                               for freq-idx = (funcall freq-idx-transform-fn x)
-                               do (progn
-                                    (setf (cffi:mem-aref p2 :float i) (float (+ (phase (aref fft x)) (* angle freq-idx)) 1.0))
-                                    ;;                 (setf (cffi:mem-aref p2 :float i) (float (elt point 3) 1.0))
-                                    (if *print* (format t " ~a~%"
-                                                        (cffi:mem-aref p2 :float i))))))))))
+                       (with-bound-buffer (:array-buffer angle-vbo)
+                         (gl:with-mapped-buffer (p2 :array-buffer :read-write)
+                           (loop
+                             for i from 0
+                             for x in curr-fft-idxs
+                             with tmp-angle = (if continuous-p angle (* 2 pi (/ (floor (* fft-size (/ angle (* 2 pi)))) fft-size)))
+                             for freq-idx = (funcall freq-idx-transform-fn x)
+                             do (progn
+                                  (setf (cffi:mem-aref p2 :float i) (float (+ (phase (aref fft x)) (* tmp-angle freq-idx)) 1.0))
+                                  ;;                 (setf (cffi:mem-aref p2 :float i) (float (elt point 3) 1.0))
+                                  (if *print* (format t " ~a~%"
+                                                      (cffi:mem-aref p2 :float i))))))))))
                  (setf angle (mod (+ angle angle-incr) (* 2 pi)))
                  (setf last-pos curr-pos)))
            (gl:matrix-mode :modelview)
@@ -1009,16 +1010,18 @@
     (#\f (setf (follow w) (not (follow w))))
     (#\c (clear-shape w))
     (#\u (setf (draw-once-p w) t))
+    (#\a (setf (zero-z w) (not (zero-z w)))
+     (if (zero-z w)
+         (set-zero-time-axis w)
+         (set-freq-axis w)))
+    (#\SPACE (toggle-draw w))
+    (#\q (setf (continuous-p w) (not (continuous-p w))))
     (#\1 (format t "mode: 1~%") (gl-set-mode 1 w))
     (#\2 (format t "mode: 2~%") (gl-set-mode 2 w))
     (#\3 (format t "mode: 3~%") (gl-set-mode 3 w))
     (#\4 (format t "mode: 4~%") (gl-set-mode 4 w))
     (#\5 (format t "mode: 5~%") (gl-set-mode 5 w))
-    (#\a (setf (zero-z w) (not (zero-z w)))
-     (if (zero-z w)
-         (set-zero-time-axis w)
-         (set-freq-axis w)))
-    (#\SPACE (toggle-draw w))))
+))
 
 ;; Cleanup.
 ;; Most of the objects we created have analogous deletion function.
@@ -1038,10 +1041,6 @@
          (setf (glut::destroyed w) t)
          (glut:destroy-window (glut:id w))))))
 
-
-
-(progn
-)
 
 
 ;;; (02-indexed-circles)
@@ -1097,7 +1096,7 @@
 (gl-enqueue (gl-set-shape *achtel-512* *window*) *window*)
 
 (setf (calc-offs-fn *window*) #'gl-set-offset-vectors-spectrum)
-(setf (draw-fn *window*) #'draw-spectrum-view))
+(setf (draw-fn *window*) #'draw-spectrum-view)
 
 (curr-path-length *window*)
 

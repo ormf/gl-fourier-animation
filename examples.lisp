@@ -32,9 +32,20 @@
   (gl-enqueue (gl-set-mode 1 *window*) *window*)
   (gl-enqueue (gl-set-shape *cos-pulse-512* *window*) *window*))
 
+(gl-enqueue (gl-set-shape *violinschluessel-512* *window*) *window*)
+(gl-enqueue (gl-set-shape *achtel-512* *window*) *window*)
+
+(gl-enqueue (gl-set-shape *sawtooth-512* *window*) *window*)
+
+(gl-enqueue (gl-set-shape *hessen-512* *window*) *window*)
+(gl-enqueue (gl-set-shape *sawtooth-8* *window*) *window*)
+(setf (continuous-p *window*) t)
+
+(setf (continuous-p *window*) nil)
+(gl-enqueue (gl-set-shape *sawtooth-512* *window*) *window*)
 (progn
   (setf (continuous-p *window*) t)
-  (gl-enqueue (gl-set-fft-idxs '(1 511) *window*) *window*)
+  (gl-enqueue (gl-set-fft-idxs '(1 2 510 511) *window*) *window*)
   (gl-enqueue (gl-set-mode 1 *window*) *window*)
   (gl-enqueue (gl-set-shape *sin-pulse-512* *window*) *window*))
 
@@ -50,6 +61,16 @@
   (setf (angle *window*) 0)
   (setf (draw-once-p *window*) t))
 
+(gl-enqueue (gl-set-fft-idxs '(1 511) *window*) *window*)
+(gl-enqueue (gl-set-fft-idxs '(1 2 510 511) *window*) *window*)
+(gl-enqueue (gl-set-fft-idxs '(1 2 3 509 510 511) *window*) *window*)
+(gl-enqueue (gl-set-fft-idxs '(1 2 3 4 508 509 510 511) *window*) *window*)
+(gl-enqueue (gl-set-fft-idxs '(1 2 3 4 5 507 508 509 510 511) *window*) *window*)
+(gl-enqueue (gl-set-fft-idxs '(1 2 3 4 5 507 508 509 510 511) *window*) *window*)
+(gl-enqueue (gl-set-fft-idxs '(2 510) *window*) *window*)
+(gl-enqueue (gl-set-fft-idxs '(3 509) *window*) *window*)
+
+
 (gl-enqueue (gl-set-fft-idxs '(0 4) *window*) *window*)
 (gl-enqueue (gl-set-fft-idxs '(1 7) *window*) *window*)
 
@@ -57,8 +78,12 @@
   (setf (continuous-p *window*) nil)
 )
 
-(progn
-)
+(defun square (x)
+  "square a number"
+  (* x x))
+
+
+
 (gl-enqueue (gl-set-fft-idxs '(1 7) *window*) *window*)
 (gl-enqueue (gl-set-fft-idxs '(2 6) *window*) *window*)
 (gl-enqueue (gl-set-fft-idxs '(3 5) *window*) *window*)
@@ -67,6 +92,8 @@
 (progn
   (gl-enqueue (gl-set-fft-idxs '(1 511) *window*) *window*)
   (gl-enqueue (gl-set-shape *cos-pulse-512* *window*) *window*))
+
+(setf (continuous-p *window*) t)
 
 (progn
   (gl-enqueue (gl-set-fft-idxs '(1) *window*) *window*)
@@ -82,3 +109,5 @@
 (progn
   (gl-enqueue (gl-set-shape *cos-pulse-8* *window*) *window*)
   (gl-enqueue (gl-set-fft-idxs '(1) *window*) *window*))
+
+(gl-enqueue (gl-set-shape *sin-pulse-512* *window*) *window*)
