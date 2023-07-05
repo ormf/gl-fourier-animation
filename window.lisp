@@ -31,6 +31,7 @@
        (progn ,@body)
      (continue () :report "Swank.Live: Continue")))
 
+#+swank
 (defun update-swank ()
   "Called from within the main loop, this keep the lisp repl
    working while cepl runs"
@@ -39,6 +40,16 @@
                           (swank::default-connection))))
       (when connection
         (swank::handle-requests connection t)))))
+
+#+slynk
+(defun update-swank ()
+  "Called from within the main loop, this keep the lisp repl
+   working while cepl runs"
+  (continuable
+    (let ((connection (or slynk::*emacs-connection*
+                          (slynk::default-connection))))
+      (when connection
+        (slynk::handle-requests connection t)))))
 
 (defclass gl-window (glut:window) 
   ()

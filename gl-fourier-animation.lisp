@@ -116,31 +116,31 @@
     (sdl:with-events ()
       (:quit-event () t)
       (:key-down-event ()
-       (sdl:push-quit-event))
+                       (sdl:push-quit-event))
       (:idle ()
-       ;; Change the color of the box if the left mouse button is depressed
-              ;; Clear the display each game loop
-       (sdl:clear-display sdl:*black*)
-       ;; Draw the shape outline
-       (sdl-draw-shape)
-       (paint)
-       (let ((offset (get-offset *mode*)))
-         (with-slots (fft scale freq-idx-transform-fn) *curr-sdl-shape*
-           (dotimes (i *max-num*)
-             (let* ((x (get-idx i *mode*))
-                    (curr (* (aref fft x) scale
-                             (exp (* +i+ (funcall freq-idx-transform-fn x) *angle*)))))
-               (unless (= x 0) (draw-circled-arrow curr offset))
-               (case *mode*
-                 (1 (setf offset (complex (+ 50 (* (mod x 9) 100))
-                                          (+ 60 (* (mod (floor x 9) 9) 100)))))
-                 (otherwise (incf offset curr))))))
-         (incf *angle* *angle-increment*)
-         (setf *curr-path-idx* (mod (1- *curr-path-idx*) *max-path-length*))
-         (setf *path-size* (min (1+ *path-size*) *max-path-length*))
-         (setf (aref *cyclic-path* *curr-path-idx*) (vector (round (realpart offset)) (round (imagpart offset)))))
-       ;; Redraw the display
-       (sdl:update-display)))))
+             ;; Change the color of the box if the left mouse button is depressed
+             ;; Clear the display each game loop
+             (sdl:clear-display sdl:*black*)
+             ;; Draw the shape outline
+             (sdl-draw-shape)
+             (paint)
+             (let ((offset (get-offset *mode*)))
+               (with-slots (fft scale freq-idx-transform-fn) *curr-sdl-shape*
+                 (dotimes (i *max-num*)
+                   (let* ((x (get-idx i *mode*))
+                          (curr (* (aref fft x) scale
+                                   (exp (* +i+ (funcall freq-idx-transform-fn x) *angle*)))))
+                     (unless (= x 0) (draw-circled-arrow curr offset))
+                     (case *mode*
+                       (1 (setf offset (complex (+ 50 (* (mod x 9) 100))
+                                                (+ 60 (* (mod (floor x 9) 9) 100)))))
+                       (otherwise (incf offset curr))))))
+               (incf *angle* *angle-increment*)
+               (setf *curr-path-idx* (mod (1- *curr-path-idx*) *max-path-length*))
+               (setf *path-size* (min (1+ *path-size*) *max-path-length*))
+               (setf (aref *cyclic-path* *curr-path-idx*) (vector (round (realpart offset)) (round (imagpart offset)))))
+             ;; Redraw the display
+             (sdl:update-display)))))
 
 ;;; (setf *angle-increment* 0.01)
 ;;; (setf *mode* 2)
