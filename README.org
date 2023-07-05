@@ -16,7 +16,7 @@
 #+TITLE: README.org
 
 
-* Gl Fourier Animation
+* GL Fourier Animation
   Common Lisp framework for GL Animation and application of Fourier
   Resynthesis inspired by the YouTube videos of 3Blue1Brown. The whole
   port was done as a learning experience but has been successfully
