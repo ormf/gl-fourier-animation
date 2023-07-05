@@ -20,6 +20,25 @@
 
 (in-package :gl-fourier-animation)
 
+;;; reset view angles
+
+(progn
+  (setf (x-angle *window*) 0)
+  (setf (y-angle *window*) 0)
+  (setf (z-angle *window*) 0))
+
+;;; set speed of animation
+
+(setf *angle-incr* 0.001)
+
+;;; load other shapes
+
+(gl-enqueue (gl-set-shape *sawtooth-512* *window*) *window*)
+(gl-enqueue (gl-set-shape *violinschluessel-512* *window*) *window*)
+(gl-enqueue (gl-set-shape *hessen-512* *window*) *window*)
+
+;;; a real valued cosine wave
+
 (progn
   (setf (continuous-p *window*) t)
   (gl-enqueue (gl-set-fft-idxs '(1 511) *window*) *window*)
@@ -111,3 +130,4 @@
   (gl-enqueue (gl-set-fft-idxs '(1) *window*) *window*))
 
 (gl-enqueue (gl-set-shape *sin-pulse-512* *window*) *window*)
+
