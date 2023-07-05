@@ -24,7 +24,7 @@
 
 ** License
 
-   GNU gpl 2.0 or later (see License.txt).
+   GNU gpl 2.0 or later (see LICENSE).
    
 ** (c) Orm Finnendahl 2021
 
