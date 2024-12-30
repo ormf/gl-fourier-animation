@@ -46,9 +46,8 @@
   (02-indexed-circles)
 
   #+END_SRC
-  The window should display the animation of drawing a eigth note
-  symbol in the complex plane using the addition of rotating
-  vectors.
+  The window should display the animation of drawing an eigth note
+  symbol in the complex plane using the addition of rotating vectors.
 
   Use the <space> key to start/stop the animation
 
