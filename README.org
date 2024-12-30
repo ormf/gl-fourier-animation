@@ -45,28 +45,32 @@
 
   (02-indexed-circles)
 
-  ;;; The window should display the animation of drawing a eigth note
-  ;;; symbol in the complex plane using the addition of rotating
-  ;;; vectors.
-
-  ;;; Use the <space> key to start/stop the animation
-
-  ;;; Drag the mouse to rotate the image in 3D space (x/y are
-  ;;; real/imaginary, z is time).  <Ctrl-mousewheel> zooms in/out.
-  ;;; Use the number keys on your keyboard to switch between different
-  ;;; "modes": 1 - The vectors of the fourier transform are added and
-  ;;; their sum is drawn as a yellow line.
-
-  ;;; 2 - All vectors are centered on the origin of the complex plane
-  ;;;     and the z axis is the index of the fourier transform,
-  ;;;     mirrored on z = 0 ("negative" indexes)
-  ;;;
-  ;;; 3 - Stationary representation of the fourier analysis with vectors
-  ;;;     (the initial state of the animation). The z axis is the index of
-  ;;;     the fourier transform.  4 - the same as 2 but with positive
-  ;;;     indexes.
-
   #+END_SRC
+  The window should display the animation of drawing a eigth note
+  symbol in the complex plane using the addition of rotating
+  vectors.
+
+  Use the <space> key to start/stop the animation
+
+  Drag the mouse to rotate the image in 3D space (x/y are
+  real/imaginary, z is time).  <Ctrl-mousewheel> zooms in/out.
+  Use the number keys on your keyboard to switch between different
+  "modes":
+
+  1 - The vectors of the fourier transform are added and their sum
+      is drawn as a yellow line.
+
+  2 - All vectors are centered on the origin of the complex plane
+      and the z axis is the index of the fourier transform,
+      mirrored on z = 0 ("negative" indexes)
+
+  3 - Stationary representation of the fourier analysis with vectors
+      (the initial state of the animation). The z axis is the index of
+      the fourier transform.
+
+  4 - the same as 2 but with positive
+      indexes.
+
 
    Also see the examples.lisp file for how to load different shapes and change their parameters.
 
