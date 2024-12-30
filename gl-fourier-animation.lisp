@@ -124,10 +124,10 @@
              ;; Draw the shape outline
              (sdl-draw-shape)
              (paint)
-             (let ((offset (get-offset *mode*)))
+             (let ((offset (get-offset *window* *mode*)))
                (with-slots (fft scale freq-idx-transform-fn) *curr-sdl-shape*
                  (dotimes (i *max-num*)
-                   (let* ((x (get-idx i *mode*))
+                   (let* ((x (get-idx i *mode* 1))
                           (curr (* (aref fft x) scale
                                    (exp (* +i+ (funcall freq-idx-transform-fn x) *angle*)))))
                      (unless (= x 0) (draw-circled-arrow curr offset))
@@ -149,7 +149,7 @@
 (setf *mode* 3)
 (setf *path-size* 0)
 (setf *max-num* 512)
-;;; (set-shape *violinschluessel-512*)
+;;; (gl-set-shape *violinschluessel-512*)
 
 ;; (set-shape *achtel-512*)
 ;; (set-shape *hessen-512*)

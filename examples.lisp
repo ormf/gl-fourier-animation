@@ -20,6 +20,9 @@
 
 (in-package :gl-fourier-animation)
 
+;;; start gl window
+(02-indexed-circles)
+
 ;;; reset view angles
 
 (progn
@@ -29,7 +32,7 @@
 
 ;;; set speed of animation
 
-(setf *angle-incr* 0.001)
+(setf *angle-incr* 0.2)
 
 ;;; load other shapes
 
@@ -78,7 +81,7 @@
   (gl-enqueue (gl-set-mode 3 *window*) *window*)
   (gl-enqueue (gl-set-shape *sin-pulse-8* *window*) *window*)
   (setf (angle *window*) 0)
-  (setf (draw-once-p *window*) t))
+  (setf (draw-once-p *window*) t)) 
 
 (gl-enqueue (gl-set-fft-idxs '(1 511) *window*) *window*)
 (gl-enqueue (gl-set-fft-idxs '(1 2 510 511) *window*) *window*)
@@ -94,14 +97,7 @@
 (gl-enqueue (gl-set-fft-idxs '(1 7) *window*) *window*)
 
 (progn
-  (setf (continuous-p *window*) nil)
-)
-
-(defun square (x)
-  "square a number"
-  (* x x))
-
-
+  (setf (continuous-p *window*) nil))
 
 (gl-enqueue (gl-set-fft-idxs '(1 7) *window*) *window*)
 (gl-enqueue (gl-set-fft-idxs '(2 6) *window*) *window*)
@@ -125,9 +121,26 @@
 (gl-enqueue (gl-set-fft-idxs '(4) *window*) *window*)
 (gl-enqueue (gl-set-fft-idxs '(5) *window*) *window*)
 
+
 (progn
   (gl-enqueue (gl-set-shape *cos-pulse-8* *window*) *window*)
   (gl-enqueue (gl-set-fft-idxs '(1) *window*) *window*))
 
 (gl-enqueue (gl-set-shape *sin-pulse-512* *window*) *window*)
 
+(progn
+  (setf (x-angle *window*) 0)
+  (setf (y-angle *window*) 0)
+  (setf (z-angle *window*) 0))
+
+(setf (x-angle *window*) 300)
+
+(progn
+  (setf (x-angle *window*) 270)
+  (setf (y-angle *window*) 90)
+  (setf (z-angle *window*) 0))
+
+(progn
+  (setf (x-angle *window*) 180)
+  (setf (y-angle *window*) 90) ;;; hier
+  (setf (z-angle *window*) 0))
